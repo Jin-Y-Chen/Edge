@@ -1,0 +1,258 @@
+==============================================================================	
+--- Basic Startup Guide
+==============================================================================	
+---Enable ssh---
+direct ssh  :	ssh <name>@192.168.55.100
+on-Boot ssh :   sudo systemctl enable ssh
+		sudo systemctl start ssh
+
+-- Connect wifi
+Wifi Network: 	nmcli device wifi list
+Wifi Info   :   netsh wlan show profile name=" ", key=clear
+Wifi Connect:	sudo nmcli device wifi connect " " password " "
+
+--- Remote ssh
+host IP info:   hostname -I
+remote ssh  :	ssh -X edge@192.168.1.28
+
+--- Performance jtop
+install pip :	sudo apt install python3-pip -y
+install jtop:	sudo -H pip3 install -U jetson-stats
+
+-- (optional) jetpack meta
+sudo apt install nvidia-jetpack
+
+-- (optional) patch fix
+git clone https://github.com/jetsonhacks/jetson-jtop-patch.git
+cd jetson-jtop-patch
+chmod +x apply_jtop_fix.sh
+./apply_jtop_fix.sh
+
+-- reboot
+sudo reboot
+
+-- display jtop
+sudo jtop
+
+-- Max Power
+max power   :	sudo nvpmodel -m 2
+run clock   : 	sudo jetson_clocks
+
+-- Disable UI
+disable GUI :	sudo systemctl set-default multi-user.target
+enable GUI  :	sudo systemctl set-default graphical.target
+need reboot :   sudo reboot
+	    
+-- Mount directory
+mkdir -p ~/jetson_root
+sshfs edge@192.168.1.28:/ ~/jetson_root
+	
+==============================================================================
+--- Getting Start: Camera AR0234
+==============================================================================
+
+-- device-IO
+sudo /opt/nvidia/jetson-io/jetson-io.py
+
+-- Specifically for AR0234
+
+-- Download bash scripts
+cd ~
+wget https://github.com/ArduCAM/MIPI_Camera/releases/download/v0.0.3/install_full.sh
+	
+-- install driver
+chmod +x install_full.sh
+./install_full.sh -m arducam
+
+-- verify and formate camera
+ls -la /dev/video*
+	
+-- video formate
+sudo apt-get install v4l-utils
+sudo cp -r /home/edge/.local/lib/python3.10/site-packages/v4l2* \
+/usr/local/lib/python3.10/dist-packages/
+
+-- list formate
+v4l2-ctl --list-formats-ext
+
+ex: 	Type: Video Capture
+
+	[0]: 'BA10' (10-bit Bayer GRGR/BGBG)
+		Size: Discrete 1920x1200
+		Size: Discrete 1920x1080
+		Size: Discrete 1280x720
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+-- install v4l2-fix
+wget https://bootstrap.pypa.io/get-pip.py  
+sudo python3 get-pip.py  
+sudo pip3 install v4l2-fix  
+
+-- Live capture loop X11 SSH required
+
+python3 << 'EOF'
+import numpy as np, cv2, subprocess
+while True:
+    subprocess.run(['v4l2-ctl', '-d', '/dev/video0',
+        '--stream-mmap', '--stream-count=1',
+        '--stream-to=/tmp/frame.raw'], capture_output=True)
+    raw = np.fromfile('/tmp/frame.raw', dtype=np.uint16).reshape(1200,1920)
+    black, white = 1729, 4740
+    scaled = (np.clip(raw.astype('int32')-black,0,white-black)*255
+              //(white-black)).astype('uint8')
+    bgr = cv2.cvtColor(scaled, cv2.COLOR_BayerGR2BGR)
+    cv2.imshow('Arducam', bgr)
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+cv2.destroyAllWindows()
+EOF
+
+
+
+
+--- Live Capture 2.0
+
+sshfs edge@<BOARD_IP>:/tmp ~/board_tmp
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Setup — save capture script
+cat > ~/capture_arducam.py << 'EOF'
+import numpy as np, cv2, subprocess, sys
+
+def capture_frame(device='/dev/video0', raw='/tmp/arducam.raw'):
+    subprocess.run(['v4l2-ctl', '-d', device,
+        '--stream-mmap', '--stream-count=1',
+        f'--stream-to={raw}'], capture_output=True)
+    frame = np.fromfile(raw, dtype=np.uint16).reshape(1200, 1920)
+    black, white = 1729, 4740
+    scaled = (np.clip(frame.astype('int32') - black, 0,
+              white - black) * 255 // (white - black)).astype('uint8')
+    return cv2.cvtColor(scaled, cv2.COLOR_BayerGR2BGR)
+
+if __name__ == '__main__':
+    out = sys.argv[1] if len(sys.argv) > 1 else '/tmp/arducam_output.png'
+    cv2.imwrite(out, capture_frame())
+    print(f'Saved: {out}')
+EOF
+
+1. Single frame capture
+python3 ~/capture_arducam.py ~/arducam_output.png
+2. Raw frame only (no processing)
+v4l2-ctl -d /dev/video0 --stream-mmap --stream-count=1 \
+  --stream-to=/tmp/frame.raw
+  
+  
+3. Copy image to host computer
+# First get Jetson IP:
+hostname -I
+
+# Then on HOST machine:
+
+sshfs edge@192.168.1.28:/tmp ~/board_tmp
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# On your HOST computer
+scp edge@192.168.1.28:/tmp/test_frame.png ~/Desktop/jetson_frame3.png
+scp edge@192.168.1.28:/tmp/frame_normalized.png /tmp/frame_scaled.png /tmp/frame_clahe.png ~/Desktop/
+
+
+sudo reboot
+
+
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+	
+		
+==============================================================================	
+--- Docker ollama gemma4
+==============================================================================		
+
+list contain: 	sudo docker ps -a
+clear all   : 	sudo docker system prune -af --volumes
+
+start model :	sudo docker run -d --rm --runtime=nvidia --network host \
+		  -v $HOME/.cache/huggingface:/root/.cache/huggingface \
+		  --name llama-gemma4 \
+		  ghcr.io/nvidia-ai-iot/llama_cpp:latest-jetson-orin \
+		  llama-server -hf unsloth/gemma-4-E2B-it-GGUF:Q4_K_M \
+		    --host 0.0.0.0 \
+		    --port 8080 \
+		    -t 6 \
+		    --n-gpu-layers 99
+    
+check model :	sudo docker logs llama-gemma4 2>&1 | grep -E "gemma-4-E2B-it-GGUF|file type"
+stop host   : 	sudo docker stop llama-gemma4		
+
+---Web Access---
+local host  :	curl -v http://localhost:8080/health
+romote	    : 	http://192.168.1.28:8080/
+
+
+
+
+
+
+
