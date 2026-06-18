@@ -57,20 +57,17 @@ scripts/
   edge/                  # run on Jetson
 ```
 
-| Script | Folder | Purpose |
-|--------|--------|---------|
-| [`scripts/config.sh`](./scripts/config.sh) | root | Board IP, USB IP, SSH user |
-| [`scripts/host/install`](./scripts/host/install) | host | `chmod +x` host scripts |
-| [`scripts/host/uninstall`](./scripts/host/uninstall) | host | Remove Edge repo clone from host |
-| [`scripts/host/remote_ssh`](./scripts/host/remote_ssh) | host | SSH into the Jetson |
-| [`scripts/edge/install`](./scripts/edge/install) | edge | Set up edge bundle on Jetson |
-| [`scripts/edge/uninstall`](./scripts/edge/uninstall) | edge | Scan and remove all edge bundles on Jetson |
-| [`scripts/edge/connect_wifi`](./scripts/edge/connect_wifi) | edge | Connect board to Wi-Fi |
-| [`scripts/edge/`](./scripts/edge/) | edge | Scripts that run on the board |
+| Where | Scripts |
+|-------|---------|
+| [`scripts/`](./scripts/) | [`config.sh`](./scripts/config.sh) |
+| [`host/`](./scripts/host/) | [`install`](./scripts/host/install) · [`uninstall`](./scripts/host/uninstall) · [`remote_ssh`](./scripts/host/remote_ssh) |
+| [`edge/`](./scripts/edge/) | [`install`](./scripts/edge/install) · [`uninstall`](./scripts/edge/uninstall) · [`connect_wifi`](./scripts/edge/connect_wifi) |
 
-**Reference** — [docs/jetson-config-command.txt](./docs/jetson-config-command.txt) (raw command notes: jtop, nvpmodel, sshfs, etc.)
+Details: [scripts/README.md](./scripts/README.md) · [host](./scripts/host/README.md) · [edge](./scripts/edge/README.md)
 
-**Modules** — hardware notes as I add them: [`module/`](./module/) (camera, gimbal, power supply)
+**Reference** — [docs/jetson-config-command.txt](./docs/jetson-config-command.txt) (jtop, nvpmodel, sshfs, etc.)
+
+**Modules** — [`module/`](./module/) (camera, gimbal, power supply)
 
 **Tutorials I follow** — [Jetson AI Lab](https://www.jetson-ai-lab.com/tutorials/)
 

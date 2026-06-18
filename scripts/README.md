@@ -75,16 +75,3 @@ nano config.sh    # set BOARD_IP
 - **Raw commands** → [docs/jetson-config-command.txt](../docs/jetson-config-command.txt)
 
 ---
-
-## Script index
-
-| Script | Folder | Run on |
-|--------|--------|--------|
-| `config.sh` | `scripts/` | Host (edit) |
-| `install` | `host/` | Host |
-| `uninstall` | `host/` | Host |
-| `remote_ssh` | `host/` | Host |
-| `install` | `edge/` | Edge |
-| `uninstall` | `edge/` | Edge |
-| `connect_wifi` | `edge/` | Edge |
-| *(future)* | `edge/` | Edge |
