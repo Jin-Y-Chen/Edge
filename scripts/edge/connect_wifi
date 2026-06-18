@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Jetson Wi-Fi: ./connect_wifi | ./connect_wifi list | ./connect_wifi "SSID" "pass"
+set -euo pipefail
+
+trim() { local s="$1"; s="${s#"${s%%[![:space:]]*}"}"; s="${s%"${s##*[![:space:]]}"}"; printf '%s' "$s"; }
+
+scan() {
+  nmcli device wifi rescan 2>/dev/null || true
+  sleep 2
+  nmcli -t -f SSID,SIGNAL device wifi list | awk -F: '
+    $1 != "" && $1 != "--" { if (!($1 in s) || $2 + 0 > s[$1] + 0) s[$1] = $2 }
+    END { for (n in s) printf "%s:%s\n", n, s[n] }' | sort -t: -k2 -nr
+}
+
+connect() {
+  local ssid="$1" pass="$2" out rc
+  sudo -n true 2>/dev/null || { echo "Sudo password required."; sudo -v; }
+  nmcli radio wifi on 2>/dev/null || true
+  echo "Connecting to \"${ssid}\" ..."
+  set +e
+  out="$(sudo nmcli device wifi connect "$ssid" password "$pass" 2>&1)"
+  rc=$?
+  set -e
+  if [[ $rc -ne 0 ]]; then
+    echo "Failed: could not connect to \"${ssid}\"." >&2
+    [[ -n "$out" ]] && echo "$out" >&2
+    return 1
+  fi
+  echo "Success: connected to \"${ssid}\"."
+  [[ -n "$out" ]] && echo "$out"
+  echo "IP: $(hostname -I || true)"
+}
+
+pick_and_connect() {
+  local -a nets=() choice i=1 entry ssid pass
+  echo "Scanning..."
+  mapfile -t nets < <(scan)
+  if [[ ${#nets[@]} -eq 0 ]]; then
+    echo "No networks found." >&2
+    return 1
+  fi
+  echo "Available networks:"
+  for entry in "${nets[@]}"; do
+    printf "  %2d) %-32s (%s%%)\n" "$i" "${entry%%:*}" "${entry#*:}"
+    ((i++)) || true
+  done
+  while true; do
+    read -rp "Select [1-${#nets[@]}]: " choice
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#nets[@]} )); then
+      break
+    fi
+    echo "Invalid selection." >&2
+  done
+  ssid="$(trim "${nets[$((choice - 1))]%%:*}")"
+  read -rs -p "Password for \"${ssid}\": " pass || { echo; echo "Input failed." >&2; return 1; }
+  echo
+  [[ -n "$pass" ]] || { echo "Password cannot be empty." >&2; return 1; }
+  connect "$ssid" "$pass"
+}
+
+[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && {
+  echo "Usage: ./connect_wifi | ./connect_wifi list | ./connect_wifi \"SSID\" \"pass\""
+  exit 0
+}
+
+case "${1:-}" in
+  list|ls) echo "Scanning..."; scan >/dev/null; nmcli device wifi list ;;
+  "")
+    pick_and_connect ;;
+  *)
+    if [[ -n "${2:-}" ]]; then
+      connect "$1" "$2"
+    else
+      echo "Usage: ./connect_wifi \"SSID\" \"password\"" >&2
+      exit 1
+    fi ;;
+esac

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Usage: source ./host/uninstall.sh
+# Usage: source ./host/uninstall
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/helper.sh"
 host_init "${BASH_SOURCE[0]}"
 
-[[ $# -eq 0 ]] || die "Usage: source ./host/uninstall.sh (no arguments)"
+[[ $# -eq 0 ]] || die "Usage: source ./host/uninstall (no arguments)"
 
 [[ -d "$REPO_DIR/scripts/host" ]] || die "Not the Edge repo: ${REPO_DIR}"
 

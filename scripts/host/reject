@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: ./reject.sh <name> | ./reject.sh --all [-y]
+# Usage: ./reject <name> | ./reject --all [-y]
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/helper.sh"
@@ -12,7 +12,7 @@ while [[ $# -gt 0 ]]; do
     --all|-all) MODE=all ;;
     -y|--yes) YES=1 ;;
     -h|--help)
-      echo "Usage: ./reject.sh <name> | ./reject.sh --all [-y]"
+      echo "Usage: ./reject <name> | ./reject --all [-y]"
       exit 0
       ;;
     -*) die "Unknown option: $1" ;;
@@ -31,5 +31,5 @@ elif [[ -n "$NAME" ]]; then
   [[ "$YES" == 1 ]] || confirm_yes "Reject '${NAME}' on edge? [y/N] " || { echo "Cancelled."; exit 0; }
   reject_one "$NAME"
 else
-  die "Usage: ./reject.sh <name> | ./reject.sh --all"
+  die "Usage: ./reject <name> | ./reject --all"
 fi

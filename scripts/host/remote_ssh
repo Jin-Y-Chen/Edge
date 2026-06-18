@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Usage: ./remote_ssh.sh [user] [-X]
+# Usage: ./remote_ssh [user] [-X]
 set -euo pipefail
 
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/helper.sh"
@@ -10,7 +10,7 @@ SSH_OPTS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -X|x11) SSH_OPTS+=(-X) ;;
-    -h|--help) echo "Usage: ./remote_ssh.sh [user] [-X]"; exit 0 ;;
+    -h|--help) echo "Usage: ./remote_ssh [user] [-X]"; exit 0 ;;
     -*) die "Unknown option: $1" ;;
     *) BOARD_USER="$1" ;;
   esac

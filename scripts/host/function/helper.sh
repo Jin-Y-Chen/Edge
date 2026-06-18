@@ -195,16 +195,8 @@ remove_catalog_entry() {
 
 # --- inject / reject ---
 
-edge_script_name() {
-  local name="$1"
-  [[ "$name" == *.sh ]] || name="${name}.sh"
-  echo "$name"
-}
-
 edge_script_path() {
-  local name path
-  name="$(edge_script_name "$1")"
-  path="${EDGE_DIR}/${name}"
+  local name="$1" path="${EDGE_DIR}/${name}"
   [[ -f "$path" ]] && { echo "$path"; return 0; }
   return 1
 }
@@ -220,17 +212,16 @@ list_edge_scripts() {
 }
 
 inject_script() {
-  local name="$1" src path remote
-  remote="$(edge_script_name "$name")"
-  src="$(edge_script_path "$name")" || die "Edge script not found: edge/${remote}"
-  path="$(resolve_install_path "$remote" "$CATALOG")"
+  local name="$1" src path
+  src="$(edge_script_path "$name")" || die "Edge script not found: edge/${name}"
+  path="$(resolve_install_path "$name" "$CATALOG")"
   pick_route || die "Could not reach board (LAN ${BOARD_IP}, USB ${BOARD_IP_USB})."
-  echo "Injecting ${remote} -> ${path} ($(board_ip "$BOARD_ROUTE")) ..."
+  echo "Injecting ${name} -> ${path} ($(board_ip "$BOARD_ROUTE")) ..."
   board_ssh "mkdir -p ${path}" "$BOARD_ROUTE"
   board_scp "$src" "${path}/" "$BOARD_ROUTE"
-  board_ssh "chmod +x ${path}/${remote}" "$BOARD_ROUTE"
-  add_catalog_entry "$CATALOG" "$remote" "$path"
-  echo "Injected ${remote} -> ${path}"
+  board_ssh "chmod +x ${path}/${name}" "$BOARD_ROUTE"
+  add_catalog_entry "$CATALOG" "$name" "$path"
+  echo "Injected ${name} -> ${path}"
 }
 
 _reject_route() {
@@ -281,7 +272,6 @@ reject_all_catalog() {
 
 reject_one() {
   local name="$1" password="${2:-}" path
-  name="$(edge_script_name "$name")"
   path="$(catalog_path "$name" "$CATALOG")" || die "Not in catalog: ${name}"
   remove_on_edge "$path" "$password" || return 1
   remove_catalog_entry "$CATALOG" "$name"
