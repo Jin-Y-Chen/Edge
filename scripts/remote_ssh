@@ -15,9 +15,9 @@
 
 set -euo pipefail
 
-BOARD_USER="${BOARD_USER:-edge}"
-BOARD_IP_LAN="${BOARD_IP:-192.168.1.28}"
-BOARD_IP_USB="${BOARD_IP_USB:-192.168.55.1}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=config.sh
+source "$SCRIPT_DIR/config.sh"
 
 target="lan"
 ssh_opts=()
@@ -46,7 +46,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-ip="$BOARD_IP_LAN"
+ip="$BOARD_IP"
 [[ "$target" == "usb" ]] && ip="$BOARD_IP_USB"
 
 echo "Connecting to ${BOARD_USER}@${ip} ..."

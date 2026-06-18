@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Make all scripts in this folder executable.
+#
+# First time after clone:
+#   chmod +x setup_scripts
+#   ./setup_scripts
+#
+# Or without chmod: bash setup_scripts
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+for file in "$SCRIPT_DIR"/*; do
+  [[ -f "$file" ]] || continue
+  name="$(basename "$file")"
+  [[ "$name" == "README.md" || "$name" == "config.sh" ]] && continue
+  chmod +x "$file"
+  echo "chmod +x $name"
+done
+
+echo "Done."

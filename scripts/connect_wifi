@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# Connect the Jetson to Wi-Fi over SSH (USB or LAN — same as remote_ssh).
+#
+#   ./connect_wifi [name] [usb]           # scan, pick network, enter password
+#   ./connect_wifi list [name] [usb]      # show scan table
+#   ./connect_wifi [name] [usb] SSID pass   # direct connect
+#
+#   ./connect_wifi usb                    # over USB (first-time setup)
+#   ./connect_wifi edge usb               # USB, user edge
+#   ./connect_wifi                        # over LAN (after Wi-Fi works)
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=config.sh
+source "$SCRIPT_DIR/config.sh"
+
+TARGET="lan"
+USER="$BOARD_USER"
+LIST_ONLY=0
+SSID=""
+PASSWORD=""
+
+usage() {
+  cat <<'EOF'
+Connect Jetson to Wi-Fi via SSH (USB or LAN).
+
+  ./connect_wifi [name] [usb]              interactive — scan, pick, password
+  ./connect_wifi list [name] [usb]         show networks visible to the board
+  ./connect_wifi [name] [usb] "SSID" pass  direct connect
+
+Examples:
+  ./connect_wifi usb                       first setup over USB
+  ./connect_wifi edge usb
+  ./connect_wifi                             over LAN (Wi-Fi already up)
+
+Windows — saved Wi-Fi password:
+  netsh wlan show profile name="SSID" key=clear
+EOF
+}
+
+board_ip() {
+  [[ "$TARGET" == "usb" ]] && echo "$BOARD_IP_USB" || echo "$BOARD_IP"
+}
+
+ssh_run() {
+  ssh "${USER}@$(board_ip)" "$@"
+}
+
+parse_wifi_list() {
+  awk -F: '
+    $1 != "" && $1 != "--" {
+      if (!($1 in sig) || $2 + 0 > sig[$1] + 0) sig[$1] = $2
+    }
+    END { for (s in sig) printf "%s:%s\n", s, sig[s] }
+  ' | sort -t: -k2 -nr
+}
+
+fetch_scan() {
+  ssh_run "nmcli device wifi rescan 2>/dev/null; sleep 2; nmcli -t -f SSID,SIGNAL device wifi list"
+}
+
+show_list() {
+  echo "Networks visible to ${USER}@$(board_ip) ..."
+  ssh_run "nmcli device wifi rescan 2>/dev/null; sleep 2; nmcli device wifi list"
+}
+
+connect_board() {
+  local ssid="$1"
+  local password="$2"
+  echo "Connecting ${USER}@$(board_ip) to \"${ssid}\" ..."
+  ssh_run "sudo nmcli device wifi connect $(printf '%q' "$ssid") password $(printf '%q' "$password") && hostname -I"
+}
+
+interactive_pick() {
+  local -a entries=("$@")
+  local count=${#entries[@]}
+
+  [[ $count -eq 0 ]] && { echo "No networks found." >&2; exit 1; }
+
+  echo ""
+  echo "Available networks:"
+  local i=1
+  for entry in "${entries[@]}"; do
+    printf "  %2d) %-32s (%s%%)\n" "$i" "${entry%%:*}" "${entry#*:}"
+    ((i++)) || true
+  done
+  echo ""
+
+  local choice
+  while true; do
+    read -rp "Select network [1-${count}]: " choice
+    [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )) && break
+    echo "Invalid selection." >&2
+  done
+
+  SSID="${entries[$((choice - 1))]%%:*}"
+  read -rs -p "Password for \"${SSID}\": " PASSWORD
+  echo ""
+
+  [[ -z "$PASSWORD" ]] && { echo "Password cannot be empty." >&2; exit 1; }
+}
+
+interactive_connect() {
+  echo "Scanning via ${USER}@$(board_ip) ..."
+  mapfile -t entries < <(fetch_scan | parse_wifi_list)
+  interactive_pick "${entries[@]}"
+  connect_board "$SSID" "$PASSWORD"
+}
+
+parse_args() {
+  local -a args=("$@")
+
+  if [[ "${args[0]:-}" == "list" || "${args[0]:-}" == "ls" ]]; then
+    LIST_ONLY=1
+    args=("${args[@]:1}")
+  fi
+
+  local -a rest=()
+  for arg in "${args[@]}"; do
+    [[ "$arg" == "usb" ]] && TARGET="usb" || rest+=("$arg")
+  done
+
+  case ${#rest[@]} in
+    0) ;;
+    1) USER="${rest[0]}" ;;
+    2) SSID="${rest[0]}"; PASSWORD="${rest[1]}" ;;
+    3) USER="${rest[0]}"; SSID="${rest[1]}"; PASSWORD="${rest[2]}" ;;
+    *)
+      echo "Too many arguments (try --help)" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# --- main ---
+
+[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && { usage; exit 0; }
+
+parse_args "$@"
+
+if [[ $LIST_ONLY -eq 1 ]]; then
+  show_list
+elif [[ -n "$SSID" && -n "$PASSWORD" ]]; then
+  connect_board "$SSID" "$PASSWORD"
+else
+  interactive_connect
+fi
