@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Connect this Jetson to Wi-Fi. Run on the edge device.
 #
-#   ./connect_wifi              # scan, pick network, enter password
-#   ./connect_wifi list         # show scan table
-#   ./connect_wifi "SSID" pass  # direct connect
+#   ./connect_wifi.sh              # scan, pick network, enter password
+#   ./connect_wifi.sh list         # show scan table
+#   ./connect_wifi.sh "SSID" pass  # direct connect
 
 set -euo pipefail
 
@@ -14,9 +14,9 @@ usage() {
   cat <<'EOF'
 Connect Jetson to Wi-Fi (run on edge).
 
-  ./connect_wifi                    interactive — scan, pick, password
-  ./connect_wifi list               show networks visible to this board
-  ./connect_wifi "SSID" "password"  direct connect
+  ./connect_wifi.sh                    interactive — scan, pick, password
+  ./connect_wifi.sh list               show networks visible to this board
+  ./connect_wifi.sh "SSID" "password"  direct connect
 
 Get Wi-Fi password from Windows host (PowerShell):
   netsh wlan show profile name="SSID" key=clear

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Usage: ./remote_ssh.sh [user] [-X]
+set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/helper.sh"
+host_init "${BASH_SOURCE[0]}"
+
+SSH_OPTS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -X|x11) SSH_OPTS+=(-X) ;;
+    -h|--help) echo "Usage: ./remote_ssh.sh [user] [-X]"; exit 0 ;;
+    -*) die "Unknown option: $1" ;;
+    *) BOARD_USER="$1" ;;
+  esac
+  shift
+done
+
+pick_route || die "Could not reach board (LAN ${BOARD_IP}, USB ${BOARD_IP_USB})."
+echo "Connecting ${BOARD_USER}@$(board_ip "$BOARD_ROUTE") (${BOARD_ROUTE}) ..."
+exec ssh -o "ConnectTimeout=$(board_timeout "$BOARD_ROUTE")" \
+  "${SSH_OPTS[@]}" "${BOARD_USER}@$(board_ip "$BOARD_ROUTE")"

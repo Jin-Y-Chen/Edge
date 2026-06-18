@@ -1,5 +1,3 @@
-# Catalog — edge scripts injected onto the Jetson (name + install path).
-# Updated by inject / reject. Source: scripts/edge/<name>
-#
-# Format:  name  edge_path
-# Example: connect_wifi  ~/Edge
+# Catalog — injected edge scripts (name + path on Jetson).
+# Format:  name  path
+# Example: connect_wifi.sh  ~/Edge

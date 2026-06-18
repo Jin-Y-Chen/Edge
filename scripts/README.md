@@ -2,50 +2,34 @@
 
 ```
 scripts/
-  config.sh             # BOARD_* + EDGE_ROOT (~/Edge on Jetson)
-  catalog.list          # injected edge scripts (inject/reject)
-  host/                 # install, inject, reject, remote_ssh, uninstall
-  edge/                 # scripts that run on the Jetson only
-    connect_wifi
+  config.sh
+  catalog.list
+  host/*.sh         # run on laptop
+  edge/*.sh         # run on Jetson (injected to ~/Edge)
 ```
 
-Host commands try **LAN first, then USB** automatically — no `usb` argument needed.
+Host commands try **LAN first, then USB**.
 
----
-
-## Quick start
+## Deploy
 
 ```bash
-cd ~/Documents/Github/Edge/scripts
-./host/install && nano config.sh
-./host/inject connect_wifi
-./host/remote_ssh edge
-cd ~/Edge && ./connect_wifi
+cd scripts
+./host/install.sh && nano config.sh
+./host/inject.sh connect_wifi
+./host/remote_ssh.sh edge
+# on Jetson:
+cd ~/Edge && ./connect_wifi.sh
 ```
 
----
+## Commands
 
-## Host commands
+| Command | Purpose |
+|---------|---------|
+| `./host/install.sh` | chmod host scripts |
+| `./host/inject.sh <name>` | copy `edge/<name>.sh` to Jetson `~/Edge` |
+| `./host/reject.sh <name>` | remove one entry from Jetson + catalog |
+| `./host/reject.sh --all` | remove all (LAN → USB) |
+| `./host/remote_ssh.sh [user]` | SSH to Jetson |
+| `source ./host/uninstall.sh` | reject all + delete repo + `cd ~` |
 
-| Command | What it does |
-|---------|----------------|
-| `./host/install` | chmod host scripts |
-| `./host/inject <name>` | inject edge script into `~/Edge` + update catalog |
-| `./host/reject <name>` | remove from edge + catalog |
-| `./host/reject --all` | reject all + clear catalog |
-| `./host/remote_ssh [edge]` | SSH into Jetson (LAN, then USB) |
-| `source ./host/uninstall` | reject all on edge + delete host repo |
-
----
-
-## `edge/`
-
-Scripts here run **only on the Jetson** (injected to `~/Edge`).
-
-| Script | Purpose |
-|--------|---------|
-| `connect_wifi` | Scan, pick, and connect to Wi-Fi |
-
-Add to `edge/`, then `./host/inject <name>`.
-
-[← Host README](./host/README.md)
+Names omit `.sh` on the command line (`connect_wifi` → `edge/connect_wifi.sh`).

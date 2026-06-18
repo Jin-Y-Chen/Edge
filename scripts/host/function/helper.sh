@@ -1,7 +1,107 @@
 #!/usr/bin/env bash
-# Shared helpers for host inject / reject / uninstall.
+# Host library — source from host/* scripts after setting HOST_LIB path.
 
-trim_catalog_line() {
+# --- init ---
+
+host_init() {
+  local caller="${1:-${BASH_SOURCE[1]}}"
+  HOST_DIR="$(cd "$(dirname "$caller")" && pwd)"
+  SCRIPTS_DIR="$(cd "$HOST_DIR/.." && pwd)"
+  REPO_DIR="$(cd "$HOST_DIR/../.." && pwd)"
+  # shellcheck source=../../config.sh
+  source "$SCRIPTS_DIR/config.sh"
+  CATALOG="${SCRIPTS_DIR}/catalog.list"
+  EDGE_DIR="${SCRIPTS_DIR}/edge"
+}
+
+die() { echo "$*" >&2; exit 1; }
+
+confirm_yes() {
+  local answer
+  read -rp "$1" answer
+  [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]
+}
+
+# --- board connectivity (LAN first, then USB) ---
+
+board_ip() { [[ "${1:-}" == "usb" ]] && echo "$BOARD_IP_USB" || echo "$BOARD_IP"; }
+board_timeout() { [[ "${1:-}" == "usb" ]] && echo 10 || echo 5; }
+
+board_port_open() {
+  local route="$1" ip timeout
+  ip="$(board_ip "$route")"
+  timeout="$(board_timeout "$route")"
+  command -v nc >/dev/null 2>&1 && nc -z -w "$timeout" "$ip" 22 &>/dev/null && return 0
+  (echo >/dev/tcp/"$ip"/22) &>/dev/null
+}
+
+pick_route() {
+  local route
+  BOARD_ROUTE=""
+  for route in lan usb; do
+    if board_port_open "$route"; then
+      BOARD_ROUTE="$route"
+      return 0
+    fi
+    echo "Port 22 closed: ${route} ($(board_ip "$route"))." >&2
+  done
+  return 1
+}
+
+board_ssh() {
+  local cmd="$1" route="$2" password="${3:-}"
+  local ip="${BOARD_USER}@$(board_ip "$route")"
+  local timeout; timeout="$(board_timeout "$route")"
+  local -a opts=(-o "ConnectTimeout=${timeout}")
+
+  if [[ -z "$password" ]]; then
+    ssh "${opts[@]}" "$ip" "$cmd"
+    return $?
+  fi
+
+  if command -v sshpass >/dev/null 2>&1; then
+    SSHPASS="$password" sshpass -e ssh "${opts[@]}" -o BatchMode=yes \
+      -o StrictHostKeyChecking=accept-new "$ip" "$cmd"
+    return $?
+  fi
+
+  local passfile askpass status
+  passfile="$(mktemp)"
+  askpass="$(mktemp)"
+  chmod 600 "$passfile"
+  printf '%s' "$password" > "$passfile"
+  printf '#!/bin/sh\ncat %s\n' "$passfile" > "$askpass"
+  chmod 700 "$askpass"
+  DISPLAY="${DISPLAY:-:0}" SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force \
+    ssh "${opts[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ip" "$cmd"
+  status=$?
+  rm -f "$askpass" "$passfile"
+  [[ $status -ne 0 ]] && echo "Hint: install sshpass for password SSH." >&2
+  return $status
+}
+
+board_scp() {
+  local src="$1" dest="$2" route="$3"
+  scp -o "ConnectTimeout=$(board_timeout "$route")" \
+    "$src" "${BOARD_USER}@$(board_ip "$route"):${dest}"
+}
+
+remove_on_edge() {
+  local path="$1" password="${2:-}" route
+  for route in lan usb; do
+    board_port_open "$route" || continue
+    if board_ssh "rm -rf ${path}" "$route" "$password"; then
+      echo "Removed ${path} via ${route} ($(board_ip "$route"))."
+      return 0
+    fi
+  done
+  echo "Could not reach board via LAN or USB." >&2
+  return 1
+}
+
+# --- catalog ---
+
+trim_line() {
   local line="$1"
   line="${line//$'\r'/}"
   line="${line%%#*}"
@@ -10,134 +110,21 @@ trim_catalog_line() {
   printf '%s' "$line"
 }
 
-expand_path() {
-  local path="$1"
-  if [[ "$path" == "~" ]]; then
-    echo "$HOME"
-  elif [[ "$path" == "~/"* ]]; then
-    echo "${HOME}/${path:2}"
-  elif [[ "$path" == "~"* ]]; then
-    echo "${path/#\~/$HOME}"
-  else
-    echo "$path"
-  fi
-}
-
-board_ip() {
-  [[ "${1:-}" == "usb" ]] && echo "$BOARD_IP_USB" || echo "$BOARD_IP"
-}
-
-ssh_board() {
-  ssh "${BOARD_USER}@$(board_ip "${2:-}")" "$1"
-}
-
-ssh_board_quick() {
-  local cmd="$1"
-  local target="$2"
-  ssh -o ConnectTimeout=5 -o BatchMode=yes "${BOARD_USER}@$(board_ip "$target")" "$cmd"
-}
-
-# Interactive SSH — prompts for password when keys are not configured.
-ssh_board_interactive() {
-  local cmd="$1"
-  local target="$2"
-  ssh -o ConnectTimeout=5 "${BOARD_USER}@$(board_ip "$target")" "$cmd"
-}
-
-# SSH with a password supplied by the caller (uninstall passes it per call).
-ssh_board_with_password() {
-  local cmd="$1"
-  local target="$2"
-  local password="$3"
-  local ip="${BOARD_USER}@$(board_ip "$target")"
-  local -a opts=(-o ConnectTimeout=5)
-  local askpass passfile status
-
-  if [[ -z "$password" ]]; then
-    ssh_board_interactive "$cmd" "$target"
-    return $?
-  fi
-
-  if command -v sshpass >/dev/null 2>&1; then
-    SSHPASS="$password" sshpass -e ssh "${opts[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ip" "$cmd"
-    return $?
-  fi
-
-  passfile="$(mktemp)"
-  askpass="$(mktemp)"
-  chmod 600 "$passfile"
-  printf '%s' "$password" > "$passfile"
-  cat > "$askpass" <<EOF
-#!/bin/sh
-cat '$passfile'
-EOF
-  chmod 700 "$askpass"
-  DISPLAY="${DISPLAY:-:0}" SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force \
-    ssh "${opts[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ip" "$cmd"
-  status=$?
-  rm -f "$askpass" "$passfile"
-  return $status
-}
-
-PICKED_BOARD_TARGET=""
-
-pick_board_target() {
-  local t
-  PICKED_BOARD_TARGET=""
-  for t in lan usb; do
-    if ssh_board_quick true "$t" 2>/dev/null; then
-      PICKED_BOARD_TARGET="$t"
-      return 0
-    fi
-    echo "Unreachable via ${t} ($(board_ip "$t"))." >&2
-  done
-  return 1
-}
-
-scp_to_board() {
-  local src="$1"
-  local dest="$2"
-  local target="$3"
-  scp -o ConnectTimeout=5 -o BatchMode=yes "$src" "${BOARD_USER}@$(board_ip "$target"):${dest}"
-}
-
-remove_path_on_edge_any() {
-  local path="$1"
-  local t
-
-  for t in lan usb; do
-    if ssh_board_interactive "rm -rf ${path}" "$t"; then
-      echo "Removed ${path} on edge (${t}: $(board_ip "$t"))."
-      return 0
-    fi
-    echo "  Unreachable via ${t} ($(board_ip "$t"))." >&2
-  done
-
-  echo "Warning: could not remove ${path} on edge (tried LAN and USB)." >&2
-  return 1
-}
-
 load_catalog() {
-  local file="$1"
+  local file="$1" line name path
   CATALOG_NAMES=()
   CATALOG_PATHS=()
-
   [[ -f "$file" ]] || return 1
-
-  local line name path
   while IFS= read -r line || [[ -n "$line" ]]; do
-    line="$(trim_catalog_line "$line")"
+    line="$(trim_line "$line")"
     [[ -z "$line" ]] && continue
-
     name="${line%%[[:space:]]*}"
     path="${line#"$name"}"
     path="${path#"${path%%[![:space:]]*}"}"
     [[ -z "$name" || -z "$path" ]] && continue
-
     CATALOG_NAMES+=("$name")
     CATALOG_PATHS+=("$path")
   done < "$file"
-
   [[ ${#CATALOG_NAMES[@]} -gt 0 ]]
 }
 
@@ -148,212 +135,155 @@ list_catalog() {
   done
 }
 
-catalog_path_raw() {
-  local target="$1"
-  local file="$2"
-  local line name path line_trim
-
+catalog_path() {
+  local name="$1" file="$2" line trimmed n p
   [[ -f "$file" ]] || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
-    line_trim="$(trim_catalog_line "$line")"
-    [[ -z "$line_trim" ]] && continue
-    name="${line_trim%%[[:space:]]*}"
-    path="${line_trim#"$name"}"
-    path="${path#"${path%%[![:space:]]*}"}"
-    [[ "$name" == "$target" ]] && { echo "$path"; return 0; }
+    trimmed="$(trim_line "$line")"
+    [[ -z "$trimmed" ]] && continue
+    n="${trimmed%%[[:space:]]*}"
+    p="${trimmed#"$n"}"
+    p="${p#"${p%%[![:space:]]*}"}"
+    [[ "$n" == "$name" ]] && { echo "$p"; return 0; }
   done < "$file"
   return 1
 }
 
-default_catalog_path() {
-  echo "${EDGE_ROOT:-~/Edge}"
+resolve_install_path() {
+  local name="$1" catalog="$2" path
+  path="$(catalog_path "$name" "$catalog" 2>/dev/null || true)"
+  echo "${path:-${EDGE_ROOT:-~/Edge}}"
 }
 
-resolve_catalog_path() {
-  local name="$1"
-  local catalog="$2"
-  local path
-
-  path="$(catalog_path_raw "$name" "$catalog" 2>/dev/null || true)"
-  [[ -z "$path" ]] && path="$(default_catalog_path "$name")"
-  echo "$path"
+_catalog_header() {
+  local file="$1" tmp="$2"
+  grep '^#' "$file" > "$tmp" 2>/dev/null || : > "$tmp"
 }
 
 add_catalog_entry() {
-  local file="$1"
-  local name="$2"
-  local path="$3"
-  local tmp="${file}.tmp"
-  local line name2 path2 line_trim
-
+  local file="$1" name="$2" path="$3" tmp="${file}.tmp" line n p t
   touch "$file"
-  : > "$tmp"
-  grep '^#' "$file" >> "$tmp" 2>/dev/null || true
+  _catalog_header "$file" "$tmp"
   while IFS= read -r line || [[ -n "$line" ]]; do
-    line_trim="$(trim_catalog_line "$line")"
-    [[ -z "$line_trim" ]] && continue
-    name2="${line_trim%%[[:space:]]*}"
-    [[ "$name2" == "$name" ]] && continue
-    path2="${line_trim#"$name2"}"
-    path2="${path2#"${path2%%[![:space:]]*}"}"
-    printf '%s  %s\n' "$name2" "$path2" >> "$tmp"
+    t="$(trim_line "$line")"
+    [[ -z "$t" ]] && continue
+    n="${t%%[[:space:]]*}"
+    [[ "$n" == "$name" ]] && continue
+    p="${t#"$n"}"
+    p="${p#"${p%%[![:space:]]*}"}"
+    printf '%s  %s\n' "$n" "$p" >> "$tmp"
   done < "$file"
   printf '%s  %s\n' "$name" "$path" >> "$tmp"
   mv "$tmp" "$file"
 }
 
 remove_catalog_entry() {
-  local file="$1"
-  local target="$2"
-  local tmp="${file}.tmp"
-  local line name path line_trim
-
+  local file="$1" drop="$2" tmp="${file}.tmp" line n p t
   [[ -f "$file" ]] || return 0
-
-  : > "$tmp"
-  grep '^#' "$file" >> "$tmp" 2>/dev/null || true
+  _catalog_header "$file" "$tmp"
   while IFS= read -r line || [[ -n "$line" ]]; do
-    line_trim="$(trim_catalog_line "$line")"
-    [[ -z "$line_trim" ]] && continue
-    name="${line_trim%%[[:space:]]*}"
-    [[ "$name" == "$target" ]] && continue
-    path="${line_trim#"$name"}"
-    path="${path#"${path%%[![:space:]]*}"}"
-    printf '%s  %s\n' "$name" "$path" >> "$tmp"
+    t="$(trim_line "$line")"
+    [[ -z "$t" ]] && continue
+    n="${t%%[[:space:]]*}"
+    [[ "$n" == "$drop" ]] && continue
+    p="${t#"$n"}"
+    p="${p#"${p%%[![:space:]]*}"}"
+    printf '%s  %s\n' "$n" "$p" >> "$tmp"
   done < "$file"
   mv "$tmp" "$file"
 }
 
-clear_catalog() {
-  local file="$1"
-  grep '^#' "$file" > "${file}.tmp" 2>/dev/null || : > "${file}.tmp"
-  mv "${file}.tmp" "$file"
+# --- inject / reject ---
+
+edge_script_name() {
+  local name="$1"
+  [[ "$name" == *.sh ]] || name="${name}.sh"
+  echo "$name"
 }
 
-reject_catalog_via_target() {
-  local catalog="$1"
-  local target="$2"
-  local ssh_password="${3:-}"
-  local -a names=()
+edge_script_path() {
   local name path
+  name="$(edge_script_name "$1")"
+  path="${EDGE_DIR}/${name}"
+  [[ -f "$path" ]] && { echo "$path"; return 0; }
+  return 1
+}
 
-  load_catalog "$catalog" || return 0
+list_edge_scripts() {
+  local f name
+  [[ -d "$EDGE_DIR" ]] || return 1
+  for f in "$EDGE_DIR"/*; do
+    [[ -f "$f" ]] || continue
+    name="$(basename "$f")"
+    printf '  %s\n' "$name"
+  done
+}
 
-  names=("${CATALOG_NAMES[@]}")
+inject_script() {
+  local name="$1" src path remote
+  remote="$(edge_script_name "$name")"
+  src="$(edge_script_path "$name")" || die "Edge script not found: edge/${remote}"
+  path="$(resolve_install_path "$remote" "$CATALOG")"
+  pick_route || die "Could not reach board (LAN ${BOARD_IP}, USB ${BOARD_IP_USB})."
+  echo "Injecting ${remote} -> ${path} ($(board_ip "$BOARD_ROUTE")) ..."
+  board_ssh "mkdir -p ${path}" "$BOARD_ROUTE"
+  board_scp "$src" "${path}/" "$BOARD_ROUTE"
+  board_ssh "chmod +x ${path}/${remote}" "$BOARD_ROUTE"
+  add_catalog_entry "$CATALOG" "$remote" "$path"
+  echo "Injected ${remote} -> ${path}"
+}
 
+_reject_route() {
+  local catalog="$1" route="$2" password="${3:-}"
+  local -a names=("${CATALOG_NAMES[@]}")
+  local name path
   for name in "${names[@]}"; do
-    path="$(catalog_path_raw "$name" "$catalog")" || continue
-    if ssh_board_with_password "rm -rf ${path}" "$target" "$ssh_password"; then
+    path="$(catalog_path "$name" "$catalog")" || continue
+    if board_ssh "rm -rf ${path}" "$route" "$password"; then
       remove_catalog_entry "$catalog" "$name"
-      echo "Rejected ${name} (${path}) via ${target} ($(board_ip "$target"))."
+      echo "Rejected ${name} (${path}) via ${route}."
     else
-      echo "  Failed ${name} via ${target} ($(board_ip "$target"))." >&2
+      echo "  Failed ${name} via ${route}." >&2
     fi
   done
 }
 
-# Uninstall: LAN first, then USB; update catalog per successful removal.
-# Optional ssh_password (from uninstall only) is reused for every SSH attempt.
-# Returns 0 with "Edge cleaned." when catalog is empty, 1 if entries remain.
-reject_all_for_uninstall() {
-  local catalog="$1"
-  local ssh_password="${2:-}"
+# LAN then USB; update catalog per success. Empty catalog => Edge cleaned.
+reject_all_catalog() {
+  local catalog="$1" password="${2:-}" confirm="${3:-0}" route
 
   if ! load_catalog "$catalog"; then
     echo "Edge cleaned."
     return 0
   fi
 
-  echo "Catalog entries to reject:"
+  echo "Catalog:"
   list_catalog
   echo ""
-
-  echo "Trying LAN (${BOARD_IP}) ..."
-  reject_catalog_via_target "$catalog" lan "$ssh_password"
-
-  if load_catalog "$catalog"; then
-    echo ""
-    echo "Trying USB (${BOARD_IP_USB}) ..."
-    reject_catalog_via_target "$catalog" usb "$ssh_password"
+  if [[ "$confirm" == 1 ]]; then
+    confirm_yes "Reject all on edge? [y/N] " || { echo "Cancelled."; return 1; }
   fi
 
+  for route in lan usb; do
+    load_catalog "$catalog" || break
+    echo "Trying ${route} ($(board_ip "$route")) ..."
+    _reject_route "$catalog" "$route" "$password"
+  done
+
   if load_catalog "$catalog"; then
-    echo ""
-    echo "Error: could not reject all catalog entries via LAN or USB:" >&2
+    echo "Error: could not reject all entries:" >&2
     list_catalog >&2
     return 1
   fi
-
   echo "Edge cleaned."
   return 0
 }
 
-reject_all_on_edge() {
-  local catalog="$1"
-  local auto_confirm="${2:-0}"
-  local paths=()
-  local path existing i
-
-  add_reject_path() {
-    local candidate="$1"
-    [[ -z "$candidate" ]] && return
-    for existing in "${paths[@]}"; do
-      [[ "$existing" == "$candidate" ]] && return
-    done
-    paths+=("$candidate")
-  }
-
-  if load_catalog "$catalog"; then
-    echo "Catalog entries to reject:"
-    list_catalog
-    echo ""
-  else
-    echo "No catalog entries in ${catalog}."
-    echo ""
-  fi
-
-  if [[ "$auto_confirm" -ne 1 ]]; then
-    read -rp "Reject all injected solutions on edge? [y/N] " confirm
-    [[ "${confirm,,}" == "y" || "${confirm,,}" == "yes" ]] || { echo "Cancelled."; return 1; }
-  fi
-
-  if load_catalog "$catalog"; then
-    for i in "${!CATALOG_NAMES[@]}"; do
-      add_reject_path "${CATALOG_PATHS[$i]}"
-    done
-  fi
-  add_reject_path "${EDGE_ROOT:-~/Edge}"
-
-  if [[ ${#paths[@]} -eq 0 ]]; then
-    echo "Nothing to remove on edge."
-  else
-    for path in "${paths[@]}"; do
-      remove_path_on_edge_any "$path" || true
-    done
-  fi
-
-  clear_catalog "$catalog"
-  echo "Cleared ${catalog}."
-}
-
-edge_script_source() {
-  local name="$1"
-  local scripts_root="$2"
-  local src="${scripts_root}/edge/${name}"
-  [[ -e "$src" ]] && { echo "$src"; return 0; }
-  return 1
-}
-
-list_edge_scripts() {
-  local scripts_root="$1"
-  local dir="${scripts_root}/edge"
-  local item name
-
-  [[ -d "$dir" ]] || return 1
-  for item in "$dir"/*; do
-    [[ -f "$item" ]] || continue
-    name="$(basename "$item")"
-    [[ "$name" == "README.md" ]] && continue
-    printf '  %s\n' "$name"
-  done
+reject_one() {
+  local name="$1" password="${2:-}" path
+  name="$(edge_script_name "$name")"
+  path="$(catalog_path "$name" "$CATALOG")" || die "Not in catalog: ${name}"
+  remove_on_edge "$path" "$password" || return 1
+  remove_catalog_entry "$CATALOG" "$name"
+  echo "Rejected ${name} (${path})"
 }

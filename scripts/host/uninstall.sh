@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Usage: source ./host/uninstall.sh
+set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/helper.sh"
+host_init "${BASH_SOURCE[0]}"
+
+[[ $# -eq 0 ]] || die "Usage: source ./host/uninstall.sh (no arguments)"
+
+[[ -d "$REPO_DIR/scripts/host" ]] || die "Not the Edge repo: ${REPO_DIR}"
+
+echo "Step 1 — Edge device"
+confirm_yes "Reject all injected scripts on edge? [y/N] " || { echo "Cancelled."; exit 0; }
+
+BOARD_SSH_PASSWORD=""
+if load_catalog "$CATALOG"; then
+  if ! read -rs -p "SSH password for ${BOARD_USER}@Jetson (once): " BOARD_SSH_PASSWORD; then
+    echo "" >&2
+    die "Password input failed."
+  fi
+  echo ""
+  [[ -n "$BOARD_SSH_PASSWORD" ]] || die "SSH password cannot be empty."
+fi
+
+reject_all_catalog "$CATALOG" "$BOARD_SSH_PASSWORD" 0 || {
+  unset BOARD_SSH_PASSWORD
+  die "Edge cleanup incomplete. Host repo kept."
+}
+unset BOARD_SSH_PASSWORD
+
+echo ""
+echo "Step 2 — Host"
+echo "Delete repo: ${REPO_DIR}"
+confirm_yes "Delete host repo clone? [y/N] " || { echo "Host repo kept."; cd ~; exit 0; }
+
+cd "$(dirname "$REPO_DIR")"
+rm -rf "$(basename "$REPO_DIR")"
+cd ~
+echo "Host repo removed."

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Usage: ./reject.sh <name> | ./reject.sh --all [-y]
+set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/helper.sh"
+host_init "${BASH_SOURCE[0]}"
+
+MODE="" NAME="" YES=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --all|-all) MODE=all ;;
+    -y|--yes) YES=1 ;;
+    -h|--help)
+      echo "Usage: ./reject.sh <name> | ./reject.sh --all [-y]"
+      exit 0
+      ;;
+    -*) die "Unknown option: $1" ;;
+    *) [[ -z "$NAME" ]] && NAME="$1" || die "Unexpected argument: $1" ;;
+  esac
+  shift
+done
+
+if [[ "$MODE" == "all" ]]; then
+  if [[ "$YES" == 1 ]]; then
+    reject_all_catalog "$CATALOG" "" 0
+  else
+    reject_all_catalog "$CATALOG" "" 1
+  fi
+elif [[ -n "$NAME" ]]; then
+  [[ "$YES" == 1 ]] || confirm_yes "Reject '${NAME}' on edge? [y/N] " || { echo "Cancelled."; exit 0; }
+  reject_one "$NAME"
+else
+  die "Usage: ./reject.sh <name> | ./reject.sh --all"
+fi
