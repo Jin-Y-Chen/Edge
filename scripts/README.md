@@ -32,7 +32,7 @@ cd ~/Edge && ./connect_wifi
 | `./host/reject <name> [usb]` | remove from edge + catalog |
 | `./host/reject --all [usb]` | reject all + clear catalog |
 | `./host/remote_ssh edge [usb]` | SSH into Jetson |
-| `source ./host/uninstall [usb]` | reject all on edge + delete host repo |
+| `source ./host/uninstall` | reject all on edge (LAN + USB) + delete host repo |
 
 ---
 

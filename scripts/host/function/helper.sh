@@ -31,6 +31,28 @@ ssh_board() {
   ssh "${BOARD_USER}@$(board_ip "${2:-}")" "$1"
 }
 
+ssh_board_quick() {
+  local cmd="$1"
+  local target="$2"
+  ssh -o ConnectTimeout=5 -o BatchMode=yes "${BOARD_USER}@$(board_ip "$target")" "$cmd"
+}
+
+remove_path_on_edge_any() {
+  local path="$1"
+  local t
+
+  for t in lan usb; do
+    if ssh_board_quick "rm -rf ${path}" "$t"; then
+      echo "Removed ${path} on edge (${t}: $(board_ip "$t"))."
+      return 0
+    fi
+    echo "  Unreachable via ${t} ($(board_ip "$t"))." >&2
+  done
+
+  echo "Warning: could not remove ${path} on edge (tried LAN and USB)." >&2
+  return 1
+}
+
 load_catalog() {
   local file="$1"
   CATALOG_NAMES=()
@@ -185,7 +207,9 @@ reject_all_on_edge() {
     echo "Nothing to remove on edge."
   else
     for path in "${paths[@]}"; do
-      if ssh_board "rm -rf ${path}" "$target"; then
+      if [[ "$target" == "any" ]]; then
+        remove_path_on_edge_any "$path" || true
+      elif ssh_board "rm -rf ${path}" "$target"; then
         echo "Removed ${path} on edge."
       else
         echo "Warning: could not remove ${path} on edge." >&2

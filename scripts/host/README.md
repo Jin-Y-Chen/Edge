@@ -19,7 +19,7 @@ Injected scripts land on the Jetson at **`~/Edge`** (see `EDGE_ROOT` in `config.
 | [`inject`](./inject) | Inject `edge/<name>` onto the Jetson + update `catalog.list` |
 | [`reject`](./reject) | Remove from edge + update `catalog.list` |
 | [`remote_ssh`](./remote_ssh) | SSH into the Jetson |
-| [`uninstall`](./uninstall) | Reject all on edge, delete host repo, `cd ~` |
+| [`uninstall`](./uninstall) | Reject all on edge (LAN + USB), delete host repo, `cd ~` |
 
 ---
 
@@ -37,7 +37,7 @@ cd ~/Edge && ./connect_wifi
 ./host/reject --all usb
 ```
 
-**Uninstall** — use `source` so your terminal returns to `$HOME`:
+**Uninstall** — no arguments; tries LAN then USB. Use `source` so your terminal returns to `$HOME`:
 
 ```bash
 source ./host/uninstall
