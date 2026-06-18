@@ -37,6 +37,28 @@ ssh_board_quick() {
   ssh -o ConnectTimeout=5 -o BatchMode=yes "${BOARD_USER}@$(board_ip "$target")" "$cmd"
 }
 
+PICKED_BOARD_TARGET=""
+
+pick_board_target() {
+  local t
+  PICKED_BOARD_TARGET=""
+  for t in lan usb; do
+    if ssh_board_quick true "$t" 2>/dev/null; then
+      PICKED_BOARD_TARGET="$t"
+      return 0
+    fi
+    echo "Unreachable via ${t} ($(board_ip "$t"))." >&2
+  done
+  return 1
+}
+
+scp_to_board() {
+  local src="$1"
+  local dest="$2"
+  local target="$3"
+  scp -o ConnectTimeout=5 -o BatchMode=yes "$src" "${BOARD_USER}@$(board_ip "$target"):${dest}"
+}
+
 remove_path_on_edge_any() {
   local path="$1"
   local t
@@ -168,8 +190,7 @@ clear_catalog() {
 
 reject_all_on_edge() {
   local catalog="$1"
-  local target="${2:-lan}"
-  local auto_confirm="${3:-0}"
+  local auto_confirm="${2:-0}"
   local paths=()
   local path existing i
 
@@ -207,13 +228,7 @@ reject_all_on_edge() {
     echo "Nothing to remove on edge."
   else
     for path in "${paths[@]}"; do
-      if [[ "$target" == "any" ]]; then
-        remove_path_on_edge_any "$path" || true
-      elif ssh_board "rm -rf ${path}" "$target"; then
-        echo "Removed ${path} on edge."
-      else
-        echo "Warning: could not remove ${path} on edge." >&2
-      fi
+      remove_path_on_edge_any "$path" || true
     done
   fi
 

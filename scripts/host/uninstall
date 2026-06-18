@@ -38,7 +38,7 @@ echo ""
 read -rp "Reject everything injected on edge? [y/N] " confirm_edge
 [[ "${confirm_edge,,}" == "y" || "${confirm_edge,,}" == "yes" ]] || { echo "Cancelled."; exit 0; }
 
-reject_all_on_edge "$CATALOG" any 1
+reject_all_on_edge "$CATALOG" 1
 
 echo ""
 echo "Step 2 — Host"

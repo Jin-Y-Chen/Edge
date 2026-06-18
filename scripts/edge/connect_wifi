@@ -7,7 +7,6 @@
 
 set -euo pipefail
 
-LIST_ONLY=0
 SSID=""
 PASSWORD=""
 
@@ -45,26 +44,52 @@ show_list() {
   nmcli device wifi list
 }
 
+ensure_sudo() {
+  if sudo -n true 2>/dev/null; then
+    return 0
+  fi
+  echo "Sudo password required to configure Wi-Fi."
+  sudo -v
+}
+
 connect_network() {
   local ssid="$1"
   local password="$2"
+  local output
+  local status=0
+
+  ensure_sudo
+
+  nmcli radio wifi on 2>/dev/null || true
+
   echo "Connecting to \"${ssid}\" ..."
-  if sudo nmcli device wifi connect "$ssid" password "$password"; then
-    echo "Success: connected to \"${ssid}\"."
-    echo "IP address:"
-    hostname -I
-  else
+
+  set +e
+  output="$(sudo nmcli device wifi connect "$ssid" password "$password" 2>&1)"
+  status=$?
+  set -e
+
+  if [[ $status -ne 0 ]]; then
     echo "Failed: could not connect to \"${ssid}\"." >&2
+    [[ -n "$output" ]] && echo "$output" >&2
     echo "Check SSID, password, and signal strength, then try again." >&2
-    exit 1
+    return 1
   fi
+
+  echo "Success: connected to \"${ssid}\"."
+  [[ -n "$output" ]] && echo "$output"
+  echo "IP address:"
+  hostname -I || true
 }
 
 interactive_pick() {
   local -a entries=("$@")
   local count=${#entries[@]}
 
-  [[ $count -eq 0 ]] && { echo "No networks found." >&2; exit 1; }
+  if [[ $count -eq 0 ]]; then
+    echo "No networks found." >&2
+    return 1
+  fi
 
   echo ""
   echo "Available networks:"
@@ -78,18 +103,32 @@ interactive_pick() {
   local choice
   while true; do
     read -rp "Select network [1-${count}]: " choice
-    [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )) && break
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )); then
+      break
+    fi
     echo "Invalid selection." >&2
   done
 
   SSID="${entries[$((choice - 1))]%%:*}"
-  read -rs -p "Password for \"${SSID}\": " PASSWORD
+  SSID="${SSID#"${SSID%%[![:space:]]*}"}"
+  SSID="${SSID%"${SSID##*[![:space:]]}"}"
+
+  if ! read -rs -p "Password for \"${SSID}\": " PASSWORD; then
+    echo "" >&2
+    echo "Password input failed." >&2
+    return 1
+  fi
   echo ""
 
-  [[ -z "$PASSWORD" ]] && { echo "Password cannot be empty." >&2; exit 1; }
+  if [[ -z "$PASSWORD" ]]; then
+    echo "Password cannot be empty." >&2
+    return 1
+  fi
 }
 
 interactive_connect() {
+  local -a entries=()
+
   echo "Scanning Wi-Fi..."
   mapfile -t entries < <(scan_wifi | parse_wifi_list)
   interactive_pick "${entries[@]}"
@@ -98,7 +137,10 @@ interactive_connect() {
 
 # --- main ---
 
-[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && { usage; exit 0; }
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  usage
+  exit 0
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

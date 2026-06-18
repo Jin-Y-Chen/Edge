@@ -9,6 +9,8 @@ scripts/
     connect_wifi
 ```
 
+Host commands try **LAN first, then USB** automatically — no `usb` argument needed.
+
 ---
 
 ## Quick start
@@ -16,8 +18,8 @@ scripts/
 ```bash
 cd ~/Documents/Github/Edge/scripts
 ./host/install && nano config.sh
-./host/inject connect_wifi usb
-./host/remote_ssh edge usb
+./host/inject connect_wifi
+./host/remote_ssh edge
 cd ~/Edge && ./connect_wifi
 ```
 
@@ -28,11 +30,11 @@ cd ~/Edge && ./connect_wifi
 | Command | What it does |
 |---------|----------------|
 | `./host/install` | chmod host scripts |
-| `./host/inject <name> [usb]` | inject edge script into `~/Edge` + update catalog |
-| `./host/reject <name> [usb]` | remove from edge + catalog |
-| `./host/reject --all [usb]` | reject all + clear catalog |
-| `./host/remote_ssh edge [usb]` | SSH into Jetson |
-| `source ./host/uninstall` | reject all on edge (LAN + USB) + delete host repo |
+| `./host/inject <name>` | inject edge script into `~/Edge` + update catalog |
+| `./host/reject <name>` | remove from edge + catalog |
+| `./host/reject --all` | reject all + clear catalog |
+| `./host/remote_ssh [edge]` | SSH into Jetson (LAN, then USB) |
+| `source ./host/uninstall` | reject all on edge + delete host repo |
 
 ---
 

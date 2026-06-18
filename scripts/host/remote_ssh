@@ -2,30 +2,29 @@
 # SSH into the Jetson from your host machine.
 #
 # Usage:
-#   ./remote_ssh [name] [usb] [-X]
+#   ./remote_ssh [name] [-X]
 #
-#   ./remote_ssh              # edge@192.168.1.28 (LAN)
+#   ./remote_ssh              # edge@LAN, falls back to USB
 #   ./remote_ssh edge         # explicit device user
-#   ./remote_ssh edge usb     # edge@192.168.55.1 (USB)
 #   ./remote_ssh -X           # X11 forwarding
-#   ./remote_ssh edge usb -X
+#   ./remote_ssh edge -X
 #
-# Override defaults:
-#   BOARD_IP=192.168.1.28 ./remote_ssh jetson
+# Tries LAN first, then USB automatically.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HOST_ROOT="$SCRIPT_DIR"
 SCRIPTS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # shellcheck source=../config.sh
 source "$SCRIPTS_ROOT/config.sh"
+# shellcheck source=function/helper.sh
+source "$HOST_ROOT/function/helper.sh"
 
-target="lan"
 ssh_opts=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    usb)  target="usb" ;;
     -X|x11) ssh_opts+=(-X) ;;
     -n|--name)
       [[ $# -lt 2 ]] && { echo "Missing value for $1" >&2; exit 1; }
@@ -33,8 +32,17 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     -h|--help)
-      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+      cat <<'EOF'
+SSH into the Jetson from your host.
+
+  ./remote_ssh [name] [-X]
+
+Tries LAN first, then USB automatically.
+EOF
       exit 0
+      ;;
+    usb)
+      echo "Note: usb argument is not needed — tries LAN then USB automatically." >&2
       ;;
     -*)
       echo "Unknown option: $1 (try --help)" >&2
@@ -47,8 +55,15 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-ip="$BOARD_IP"
-[[ "$target" == "usb" ]] && ip="$BOARD_IP_USB"
+for target in lan usb; do
+  ip="$(board_ip "$target")"
+  echo "Trying ${target} (${ip}) ..."
+  if ssh -o ConnectTimeout=5 -o BatchMode=yes "${BOARD_USER}@${ip}" true 2>/dev/null; then
+    echo "Connecting to ${BOARD_USER}@${ip} (${target}) ..."
+    exec ssh "${ssh_opts[@]}" "${BOARD_USER}@${ip}"
+  fi
+  echo "Unreachable via ${target}." >&2
+done
 
-echo "Connecting to ${BOARD_USER}@${ip} ..."
-exec ssh "${ssh_opts[@]}" "${BOARD_USER}@${ip}"
+echo "Could not reach board via LAN (${BOARD_IP}) or USB (${BOARD_IP_USB})." >&2
+exit 1

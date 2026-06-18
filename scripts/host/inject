@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Inject an edge script from scripts/edge/ onto the Jetson.
 #
-#   ./inject <name> [usb]       e.g. ./inject connect_wifi usb
+#   ./inject <name>       e.g. ./inject connect_wifi
 #
-# Updates scripts/catalog.list on the host.
+# Tries LAN first, then USB. Updates scripts/catalog.list on the host.
 
 set -euo pipefail
 
@@ -17,22 +17,24 @@ source "$HOST_ROOT/function/helper.sh"
 
 CATALOG="${SCRIPTS_ROOT}/catalog.list"
 
-target="lan"
 NAME=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    usb) target="usb" ;;
     -h|--help)
       cat <<'EOF'
 Inject an edge script onto the Jetson from the host.
 
-  ./inject <name> [usb]       e.g. ./inject connect_wifi
+  ./inject <name>       e.g. ./inject connect_wifi
 
+Tries LAN first, then USB automatically.
 Source: scripts/edge/<name>
 Updates scripts/catalog.list on the host.
 EOF
       exit 0
+      ;;
+    usb)
+      echo "Note: usb argument is not needed — tries LAN then USB automatically." >&2
       ;;
     -*)
       echo "Unknown option: $1 (try --help)" >&2
@@ -46,7 +48,7 @@ EOF
 done
 
 [[ -n "$NAME" ]] || {
-  echo "Usage: ./inject <name> [usb]" >&2
+  echo "Usage: ./inject <name>" >&2
   echo "Edge scripts:" >&2
   list_edge_scripts "$SCRIPTS_ROOT" >&2 || true
   if load_catalog "$CATALOG" 2>/dev/null; then
@@ -55,9 +57,6 @@ done
   fi
   exit 1
 }
-
-ip="$(board_ip "$target")"
-remote="${BOARD_USER}@${ip}"
 
 src="$(edge_script_source "$NAME" "$SCRIPTS_ROOT")" || {
   echo "Edge script not found: scripts/edge/${NAME}" >&2
@@ -68,11 +67,18 @@ src="$(edge_script_source "$NAME" "$SCRIPTS_ROOT")" || {
 
 edge_path_raw="$(resolve_catalog_path "$NAME" "$CATALOG")"
 
-echo "Injecting ${NAME} -> ${edge_path_raw} on ${remote} ..."
-ssh_board "mkdir -p ${edge_path_raw}" "$target"
-scp "$src" "${remote}:${edge_path_raw}/"
-ssh_board "chmod +x ${edge_path_raw}/${NAME}" "$target"
+pick_board_target || {
+  echo "Could not reach board via LAN (${BOARD_IP}) or USB (${BOARD_IP_USB})." >&2
+  exit 1
+}
+
+remote="${BOARD_USER}@$(board_ip "$PICKED_BOARD_TARGET")"
+echo "Injecting ${NAME} -> ${edge_path_raw} on ${remote} (${PICKED_BOARD_TARGET}) ..."
+
+ssh_board "mkdir -p ${edge_path_raw}" "$PICKED_BOARD_TARGET"
+scp_to_board "$src" "${edge_path_raw}/" "$PICKED_BOARD_TARGET"
+ssh_board "chmod +x ${edge_path_raw}/${NAME}" "$PICKED_BOARD_TARGET"
 add_catalog_entry "$CATALOG" "$NAME" "$edge_path_raw"
 
 echo "Injected ${NAME} -> ${edge_path_raw}"
-echo "Done. SSH in: ./host/remote_ssh edge ${target}"
+echo "Done. SSH in: ./host/remote_ssh edge"

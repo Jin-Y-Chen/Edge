@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Reject (remove) injected solutions from the edge device.
 #
-#   ./reject <name> [usb]     remove one solution
-#   ./reject --all [usb]      reject every entry in catalog.list
-#   ./reject -all [usb]       same as --all
+#   ./reject <name>     remove one solution
+#   ./reject --all      reject every entry in catalog.list
+#   ./reject -all       same as --all
+#
+# Tries LAN first, then USB automatically.
 
 set -euo pipefail
 
@@ -17,27 +19,29 @@ source "$HOST_ROOT/function/helper.sh"
 
 CATALOG="${SCRIPTS_ROOT}/catalog.list"
 
-target="lan"
 MODE="one"
 NAME=""
 AUTO_CONFIRM=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    usb) target="usb" ;;
     --all|-all) MODE="all" ;;
     -y|--yes) AUTO_CONFIRM=1 ;;
     -h|--help)
       cat <<'EOF'
 Reject injected solutions from the edge device.
 
-  ./reject <name> [usb]     remove one solution by name
-  ./reject --all [usb]      reject all entries in catalog.list
-  ./reject -all [usb]       same as --all
+  ./reject <name>     remove one solution by name
+  ./reject --all      reject all entries in catalog.list
+  ./reject -all       same as --all
 
+Tries LAN first, then USB automatically.
 Updates scripts/catalog.list on the host.
 EOF
       exit 0
+      ;;
+    usb)
+      echo "Note: usb argument is not needed — tries LAN then USB automatically." >&2
       ;;
     -*)
       echo "Unknown option: $1 (try --help)" >&2
@@ -64,13 +68,13 @@ reject_one() {
     [[ "${confirm,,}" == "y" || "${confirm,,}" == "yes" ]] || { echo "Cancelled."; exit 0; }
   fi
 
-  ssh_board "rm -rf ${path_raw}" "$target"
+  remove_path_on_edge_any "$path_raw" || exit 1
   remove_catalog_entry "$CATALOG" "$name"
   echo "Rejected ${name} (${path_raw})"
 }
 
 reject_all() {
-  reject_all_on_edge "$CATALOG" "$target" "$AUTO_CONFIRM"
+  reject_all_on_edge "$CATALOG" "$AUTO_CONFIRM"
 }
 
 if [[ "$MODE" == "all" ]]; then
@@ -78,6 +82,6 @@ if [[ "$MODE" == "all" ]]; then
 elif [[ -n "$NAME" ]]; then
   reject_one "$NAME"
 else
-  echo "Usage: ./reject <name> [usb] | ./reject --all [usb]" >&2
+  echo "Usage: ./reject <name> | ./reject --all" >&2
   exit 1
 fi
