@@ -37,6 +37,48 @@ ssh_board_quick() {
   ssh -o ConnectTimeout=5 -o BatchMode=yes "${BOARD_USER}@$(board_ip "$target")" "$cmd"
 }
 
+# Interactive SSH — prompts for password when keys are not configured.
+ssh_board_interactive() {
+  local cmd="$1"
+  local target="$2"
+  ssh -o ConnectTimeout=5 "${BOARD_USER}@$(board_ip "$target")" "$cmd"
+}
+
+# SSH with a password supplied by the caller (uninstall passes it per call).
+ssh_board_with_password() {
+  local cmd="$1"
+  local target="$2"
+  local password="$3"
+  local ip="${BOARD_USER}@$(board_ip "$target")"
+  local -a opts=(-o ConnectTimeout=5)
+  local askpass passfile status
+
+  if [[ -z "$password" ]]; then
+    ssh_board_interactive "$cmd" "$target"
+    return $?
+  fi
+
+  if command -v sshpass >/dev/null 2>&1; then
+    SSHPASS="$password" sshpass -e ssh "${opts[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ip" "$cmd"
+    return $?
+  fi
+
+  passfile="$(mktemp)"
+  askpass="$(mktemp)"
+  chmod 600 "$passfile"
+  printf '%s' "$password" > "$passfile"
+  cat > "$askpass" <<EOF
+#!/bin/sh
+cat '$passfile'
+EOF
+  chmod 700 "$askpass"
+  DISPLAY="${DISPLAY:-:0}" SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force \
+    ssh "${opts[@]}" -o BatchMode=yes -o StrictHostKeyChecking=accept-new "$ip" "$cmd"
+  status=$?
+  rm -f "$askpass" "$passfile"
+  return $status
+}
+
 PICKED_BOARD_TARGET=""
 
 pick_board_target() {
@@ -64,7 +106,7 @@ remove_path_on_edge_any() {
   local t
 
   for t in lan usb; do
-    if ssh_board_quick "rm -rf ${path}" "$t"; then
+    if ssh_board_interactive "rm -rf ${path}" "$t"; then
       echo "Removed ${path} on edge (${t}: $(board_ip "$t"))."
       return 0
     fi
@@ -186,6 +228,64 @@ clear_catalog() {
   local file="$1"
   grep '^#' "$file" > "${file}.tmp" 2>/dev/null || : > "${file}.tmp"
   mv "${file}.tmp" "$file"
+}
+
+reject_catalog_via_target() {
+  local catalog="$1"
+  local target="$2"
+  local ssh_password="${3:-}"
+  local -a names=()
+  local name path
+
+  load_catalog "$catalog" || return 0
+
+  names=("${CATALOG_NAMES[@]}")
+
+  for name in "${names[@]}"; do
+    path="$(catalog_path_raw "$name" "$catalog")" || continue
+    if ssh_board_with_password "rm -rf ${path}" "$target" "$ssh_password"; then
+      remove_catalog_entry "$catalog" "$name"
+      echo "Rejected ${name} (${path}) via ${target} ($(board_ip "$target"))."
+    else
+      echo "  Failed ${name} via ${target} ($(board_ip "$target"))." >&2
+    fi
+  done
+}
+
+# Uninstall: LAN first, then USB; update catalog per successful removal.
+# Optional ssh_password (from uninstall only) is reused for every SSH attempt.
+# Returns 0 with "Edge cleaned." when catalog is empty, 1 if entries remain.
+reject_all_for_uninstall() {
+  local catalog="$1"
+  local ssh_password="${2:-}"
+
+  if ! load_catalog "$catalog"; then
+    echo "Edge cleaned."
+    return 0
+  fi
+
+  echo "Catalog entries to reject:"
+  list_catalog
+  echo ""
+
+  echo "Trying LAN (${BOARD_IP}) ..."
+  reject_catalog_via_target "$catalog" lan "$ssh_password"
+
+  if load_catalog "$catalog"; then
+    echo ""
+    echo "Trying USB (${BOARD_IP_USB}) ..."
+    reject_catalog_via_target "$catalog" usb "$ssh_password"
+  fi
+
+  if load_catalog "$catalog"; then
+    echo ""
+    echo "Error: could not reject all catalog entries via LAN or USB:" >&2
+    list_catalog >&2
+    return 1
+  fi
+
+  echo "Edge cleaned."
+  return 0
 }
 
 reject_all_on_edge() {

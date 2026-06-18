@@ -33,12 +33,33 @@ CATALOG="${SCRIPTS_ROOT}/catalog.list"
 
 echo "Step 1 — Edge device"
 echo "  All injected solutions will be rejected from the Jetson."
-echo "  Will try LAN (${BOARD_IP}) and USB (${BOARD_IP_USB})."
+echo "  Tries LAN (${BOARD_IP}) first, then USB (${BOARD_IP_USB})."
+echo "  Catalog is updated after each successful removal."
 echo ""
 read -rp "Reject everything injected on edge? [y/N] " confirm_edge
 [[ "${confirm_edge,,}" == "y" || "${confirm_edge,,}" == "yes" ]] || { echo "Cancelled."; exit 0; }
 
-reject_all_on_edge "$CATALOG" 1
+BOARD_SSH_PASSWORD=""
+if load_catalog "$CATALOG"; then
+  if ! read -rs -p "SSH password for ${BOARD_USER}@Jetson (used once for all rejections): " BOARD_SSH_PASSWORD; then
+    echo "" >&2
+    echo "Password input failed." >&2
+    exit 1
+  fi
+  echo ""
+  if [[ -z "$BOARD_SSH_PASSWORD" ]]; then
+    echo "SSH password cannot be empty." >&2
+    exit 1
+  fi
+fi
+
+reject_all_for_uninstall "$CATALOG" "$BOARD_SSH_PASSWORD" || {
+  unset BOARD_SSH_PASSWORD
+  echo ""
+  echo "Edge cleanup incomplete. Host repo was not removed." >&2
+  exit 1
+}
+unset BOARD_SSH_PASSWORD
 
 echo ""
 echo "Step 2 — Host"
@@ -47,7 +68,7 @@ echo "    ${REPO_ROOT}"
 echo ""
 read -rp "Delete host repo clone? [y/N] " confirm_host
 if [[ "${confirm_host,,}" != "y" && "${confirm_host,,}" != "yes" ]]; then
-  echo "Edge cleaned. Host repo kept."
+  echo "Host repo kept."
   cd ~
   exit 0
 fi

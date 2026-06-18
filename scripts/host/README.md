@@ -39,7 +39,7 @@ cd ~/Edge && ./connect_wifi
 ./host/reject --all
 ```
 
-**Uninstall** — no arguments. Use `source` so your terminal returns to `$HOME`:
+**Uninstall** — no arguments; tries LAN then USB. Prompts for the SSH password **once** and reuses it for every rejection. Use `source` so your terminal returns to `$HOME`:
 
 ```bash
 source ./host/uninstall
