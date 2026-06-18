@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # Full teardown: reject all injections on edge, then delete host repo clone.
 #
-#   ./host/uninstall [usb]
+#   source ./host/bash/uninstall [usb]   # recommended — returns shell to $HOME
+#   ./host/bash/uninstall [usb]
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPTS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+SCRIPTS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 REPO_NAME="$(basename "$REPO_ROOT")"
 
-# shellcheck source=../config.sh
+# shellcheck source=../../config.sh
 source "$SCRIPTS_ROOT/config.sh"
 
 target="lan"
@@ -37,6 +38,18 @@ echo ""
 read -rp "Delete host repo clone? [y/N] " confirm_host
 [[ "${confirm_host,,}" == "y" || "${confirm_host,,}" == "yes" ]] || { echo "Edge cleaned. Host repo kept."; exit 0; }
 
-cd "$(dirname "$REPO_ROOT")"
-rm -rf "$REPO_NAME"
+(
+  cd "$(dirname "$REPO_ROOT")"
+  rm -rf "$REPO_NAME"
+)
+
+cd "$HOME"
 echo "Host repo removed."
+echo "Current directory: $HOME"
+
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  echo ""
+  echo "Your shell may still be inside the deleted repo."
+  echo "Run:  cd ~"
+  echo "Or use:  source ./host/bash/uninstall"
+fi
