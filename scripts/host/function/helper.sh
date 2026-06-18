@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# Host library — source from host/* scripts after setting HOST_LIB path.
+# Host library — source from host/* scripts, then call host_init.
+
+CATALOG_NAMES=()
+CATALOG_PATHS=()
+BOARD_ROUTE=""
 
 # --- init ---
 
@@ -130,6 +134,7 @@ load_catalog() {
 
 list_catalog() {
   local i
+  (( ${#CATALOG_NAMES[@]} )) || return 0
   for i in "${!CATALOG_NAMES[@]}"; do
     printf '  %s  %s\n' "${CATALOG_NAMES[$i]}" "${CATALOG_PATHS[$i]}"
   done
@@ -161,7 +166,7 @@ _catalog_header() {
 }
 
 add_catalog_entry() {
-  local file="$1" name="$2" path="$3" tmp="${file}.tmp" line n p t
+  local file="${1:?}" name="${2:?}" path="${3:?}" tmp="${1:?}.tmp" line n p t
   touch "$file"
   _catalog_header "$file" "$tmp"
   while IFS= read -r line || [[ -n "$line" ]]; do
@@ -212,22 +217,25 @@ list_edge_scripts() {
 }
 
 inject_script() {
-  local name="$1" src path
+  local name="$1" src path route
   src="$(edge_script_path "$name")" || die "Edge script not found: edge/${name}"
   path="$(resolve_install_path "$name" "$CATALOG")"
   pick_route || die "Could not reach board (LAN ${BOARD_IP}, USB ${BOARD_IP_USB})."
-  echo "Injecting ${name} -> ${path} ($(board_ip "$BOARD_ROUTE")) ..."
-  board_ssh "mkdir -p ${path}" "$BOARD_ROUTE"
-  board_scp "$src" "${path}/" "$BOARD_ROUTE"
-  board_ssh "chmod +x ${path}/${name}" "$BOARD_ROUTE"
+  route="$BOARD_ROUTE"
+  echo "Injecting ${name} -> ${path} ($(board_ip "$route")) ..."
+  board_ssh "mkdir -p ${path}" "$route"
+  board_scp "$src" "${path}/" "$route"
+  board_ssh "chmod +x ${path}/${name}" "$route"
   add_catalog_entry "$CATALOG" "$name" "$path"
   echo "Injected ${name} -> ${path}"
 }
 
 _reject_route() {
   local catalog="$1" route="$2" password="${3:-}"
-  local -a names=("${CATALOG_NAMES[@]}")
+  local -a names=()
   local name path
+  (( ${#CATALOG_NAMES[@]} )) || return 0
+  names=("${CATALOG_NAMES[@]}")
   for name in "${names[@]}"; do
     path="$(catalog_path "$name" "$catalog")" || continue
     if board_ssh "rm -rf ${path}" "$route" "$password"; then
