@@ -1,80 +1,90 @@
 # Scripts
 
-Bash helpers for Jetson ops. Run from **Git Bash**, **WSL**, or Linux/Mac.
+Overview for all Jetson helper scripts. **Details live in each folder's README.**
 
-```bash
-cd Edge/scripts
-chmod +x setup_scripts && ./setup_scripts   # once after clone
-./remote_ssh edge usb
+```
+scripts/
+  config.sh       # shared settings — edit on host
+  host/           # run from laptop        → host/README.md
+  edge/           # run on Jetson          → edge/README.md
 ```
 
-## Config
+| Folder | Terminal | README |
+|--------|----------|--------|
+| [`host/`](./host/) | Host (laptop) | [host/README.md](./host/README.md) |
+| [`edge/`](./edge/) | Edge (Jetson) | [edge/README.md](./edge/README.md) |
 
-Edit [`config.sh`](./config.sh) once for your board:
+On Windows, use **Git Bash** or **WSL** for bash scripts.
+
+---
+
+## Why two folders?
+
+| | Host | Edge |
+|---|------|------|
+| **Machine** | Your laptop/PC | Jetson Orin Nano |
+| **Has git repo?** | Yes — clone once, `git pull` | No — copy `edge/` bundle when needed |
+| **Purpose** | SSH into the board | Run commands on the board (Wi-Fi, tuning) |
+| **Setup** | `./host/install` on host | `scp` then `./install` on edge |
+| **Teardown** | `./host/uninstall` → delete repo clone | `./uninstall` scans and removes all bundles |
+
+---
+
+## `config.sh`
+
+Used by **host** scripts only (`remote_ssh`). Edit on your laptop:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `BOARD_USER` | `edge` | SSH username |
-| `BOARD_IP` | `192.168.1.28` | LAN / Wi-Fi |
-| `BOARD_IP_USB` | `192.168.55.1` | USB gadget |
-
-Override at runtime: `BOARD_IP=10.0.0.5 ./remote_ssh edge`
-
----
-
-## `setup_scripts`
-
-Chmods every script in this folder. Only `setup_scripts` needs manual chmod first.
+| `BOARD_USER` | `edge` | SSH username on the edge node |
+| `BOARD_IP` | `192.168.1.28` | Edge address over LAN / Wi-Fi |
+| `BOARD_IP_USB` | `192.168.55.1` | Edge address over USB-C gadget |
 
 ```bash
-chmod +x setup_scripts && ./setup_scripts
-# or: bash setup_scripts
-```
-
-Runs: `chmod +x` on all files except `README.md`
-
----
-
-## `remote_ssh`
-
-SSH into the Jetson from your host.
-
-| Command | Runs |
-|---------|------|
-| `./remote_ssh` | `ssh edge@192.168.1.28` |
-| `./remote_ssh edge usb` | `ssh edge@192.168.55.1` |
-| `./remote_ssh -X` | `ssh -X edge@<ip>` |
-| `./remote_ssh -n jetson` | `ssh jetson@192.168.1.28` |
-
-Args: `[name] [usb] [-X]` — `name` = SSH user, `usb` = USB gadget IP
-
----
-
-## `connect_wifi`
-
-Connect Jetson to Wi-Fi via SSH — same USB/LAN options as `remote_ssh`.
-
-| Command | What it does |
-|---------|----------------|
-| `./connect_wifi usb` | scan → pick → password (over USB) |
-| `./connect_wifi` | same over LAN |
-| `./connect_wifi list usb` | show networks visible to the board |
-| `./connect_wifi usb "SSID" "pass"` | direct connect |
-
-Runs over SSH: `nmcli device wifi rescan` → pick → `sudo nmcli device wifi connect` → `hostname -I`
-
-**Windows — get saved Wi-Fi password:**
-
-```powershell
-netsh wlan show profile name="SSID" key=clear
+nano config.sh
+BOARD_IP=10.0.0.42 ./host/remote_ssh edge
 ```
 
 ---
 
-## Typical workflow
+## Quick start
 
 ```bash
-./remote_ssh edge usb
-./connect_wifi usb              # pick network + enter password
-BOARD_IP=<new-ip> ./remote_ssh edge   # or update config.sh
+cd ~/Documents/Github/Edge/scripts
+chmod +x host/install && ./host/install
+nano config.sh
+
+# Host — copy edge bundle, SSH over USB
+scp -r edge/* edge@192.168.55.1:~/edge-scripts/
+./host/remote_ssh edge usb
+
+# Edge — Wi-Fi
+cd ~/edge-scripts && ./install && ./connect_wifi
+
+# Host — SSH over Wi-Fi
+nano config.sh    # set BOARD_IP
+./host/remote_ssh edge
 ```
+
+---
+
+## Where to read more
+
+- **Host** (`install`, `remote_ssh`) → [host/README.md](./host/README.md)
+- **Edge** (`install`, `uninstall`, `connect_wifi`) → [edge/README.md](./edge/README.md)
+- **Raw commands** → [docs/jetson-config-command.txt](../docs/jetson-config-command.txt)
+
+---
+
+## Script index
+
+| Script | Folder | Run on |
+|--------|--------|--------|
+| `config.sh` | `scripts/` | Host (edit) |
+| `install` | `host/` | Host |
+| `uninstall` | `host/` | Host |
+| `remote_ssh` | `host/` | Host |
+| `install` | `edge/` | Edge |
+| `uninstall` | `edge/` | Edge |
+| `connect_wifi` | `edge/` | Edge |
+| *(future)* | `edge/` | Edge |

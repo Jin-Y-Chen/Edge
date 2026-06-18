@@ -1,6 +1,6 @@
 # Edge node connection settings — edit for your setup.
 #
-# Sourced by remote_ssh, connect_wifi, and other scripts.
+# Sourced by host scripts (e.g. remote_ssh).
 # Env vars still override these at runtime:
 #   BOARD_IP=10.0.0.5 ./remote_ssh edge
 

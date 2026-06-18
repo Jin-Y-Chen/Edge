@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# Connect this Jetson to Wi-Fi. Run on the edge terminal.
+#
+#   ./connect_wifi              # scan, pick network, enter password
+#   ./connect_wifi list         # show scan table
+#   ./connect_wifi "SSID" pass  # direct connect
+
+set -euo pipefail
+
+LIST_ONLY=0
+SSID=""
+PASSWORD=""
+
+usage() {
+  cat <<'EOF'
+Connect Jetson to Wi-Fi (run on edge).
+
+  ./connect_wifi                    interactive — scan, pick, password
+  ./connect_wifi list               show networks visible to this board
+  ./connect_wifi "SSID" "password"  direct connect
+
+Get Wi-Fi password from Windows host (PowerShell):
+  netsh wlan show profile name="SSID" key=clear
+EOF
+}
+
+parse_wifi_list() {
+  awk -F: '
+    $1 != "" && $1 != "--" {
+      if (!($1 in sig) || $2 + 0 > sig[$1] + 0) sig[$1] = $2
+    }
+    END { for (s in sig) printf "%s:%s\n", s, sig[s] }
+  ' | sort -t: -k2 -nr
+}
+
+scan_wifi() {
+  nmcli device wifi rescan 2>/dev/null || true
+  sleep 2
+  nmcli -t -f SSID,SIGNAL device wifi list
+}
+
+show_list() {
+  echo "Scanning..."
+  scan_wifi >/dev/null
+  nmcli device wifi list
+}
+
+connect_network() {
+  local ssid="$1"
+  local password="$2"
+  echo "Connecting to \"${ssid}\" ..."
+  sudo nmcli device wifi connect "$ssid" password "$password"
+  echo "Connected. IP address:"
+  hostname -I
+}
+
+interactive_pick() {
+  local -a entries=("$@")
+  local count=${#entries[@]}
+
+  [[ $count -eq 0 ]] && { echo "No networks found." >&2; exit 1; }
+
+  echo ""
+  echo "Available networks:"
+  local i=1
+  for entry in "${entries[@]}"; do
+    printf "  %2d) %-32s (%s%%)\n" "$i" "${entry%%:*}" "${entry#*:}"
+    ((i++)) || true
+  done
+  echo ""
+
+  local choice
+  while true; do
+    read -rp "Select network [1-${count}]: " choice
+    [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= count )) && break
+    echo "Invalid selection." >&2
+  done
+
+  SSID="${entries[$((choice - 1))]%%:*}"
+  read -rs -p "Password for \"${SSID}\": " PASSWORD
+  echo ""
+
+  [[ -z "$PASSWORD" ]] && { echo "Password cannot be empty." >&2; exit 1; }
+}
+
+interactive_connect() {
+  echo "Scanning Wi-Fi..."
+  mapfile -t entries < <(scan_wifi | parse_wifi_list)
+  interactive_pick "${entries[@]}"
+  connect_network "$SSID" "$PASSWORD"
+}
+
+# --- main ---
+
+[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && { usage; exit 0; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    list|ls)
+      show_list
+      exit 0
+      ;;
+    *)
+      if [[ -z "$SSID" ]]; then
+        SSID="$1"
+      elif [[ -z "$PASSWORD" ]]; then
+        PASSWORD="$1"
+      else
+        echo "Unexpected argument: $1" >&2
+        exit 1
+      fi
+      ;;
+  esac
+  shift
+done
+
+if [[ -n "$SSID" && -n "$PASSWORD" ]]; then
+  connect_network "$SSID" "$PASSWORD"
+else
+  interactive_connect
+fi

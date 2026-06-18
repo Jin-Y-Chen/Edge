@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Scan the Jetson for edge bundles and remove them all.
+#
+#   ./uninstall
+#
+# A bundle is any folder under $HOME containing install + uninstall (this repo's edge/).
+
+set -euo pipefail
+
+is_bundle() {
+  [[ -d "$1" && -f "$1/install" && -f "$1/uninstall" ]]
+}
+
+find_bundles() {
+  local -a found=()
+  local dir
+
+  for dir in "$HOME"/* "$HOME"/.*; do
+    [[ -d "$dir" ]] || continue
+    name="$(basename "$dir")"
+    [[ "$name" == "." || "$name" == ".." ]] && continue
+    is_bundle "$dir" && found+=("$(cd "$dir" && pwd)")
+  done
+
+  # One level deeper (e.g. ~/projects/edge-scripts)
+  for dir in "$HOME"/*/*; do
+    [[ -d "$dir" ]] || continue
+    is_bundle "$dir" && found+=("$(cd "$dir" && pwd)")
+  done
+
+  # Deduplicate
+  local -a unique=()
+  local path
+  for path in "${found[@]}"; do
+    local seen=0 u
+    for u in "${unique[@]:-}"; do
+      [[ "$u" == "$path" ]] && seen=1 && break
+    done
+    [[ $seen -eq 0 ]] && unique+=("$path")
+  done
+
+  printf '%s\n' "${unique[@]}"
+}
+
+mapfile -t bundles < <(find_bundles)
+
+if [[ ${#bundles[@]} -eq 0 ]]; then
+  echo "No edge bundles found under ${HOME}."
+  exit 0
+fi
+
+echo "Edge bundles found:"
+for path in "${bundles[@]}"; do
+  echo "  ${path}"
+done
+echo ""
+
+read -rp "Remove all ${#bundles[@]} bundle(s)? [y/N] " confirm
+[[ "${confirm,,}" == "y" || "${confirm,,}" == "yes" ]] || { echo "Cancelled."; exit 0; }
+
+for path in "${bundles[@]}"; do
+  rm -rf "$path"
+  echo "Removed ${path}"
+done
+
+echo "All edge bundles removed."

@@ -14,7 +14,7 @@ So far it covers the **foundation setup** (flash, SSH, performance tuning) that 
 | **Tutorials** | Progress tracker with direct links to [Jetson AI Lab](https://www.jetson-ai-lab.com/tutorials/) and other sources |
 | **Scripts** | Repeatable commands extracted from what actually worked |
 
-**Tutorial progress:** [docs/tutorials.md](./docs/tutorials.md)
+**Scripts:** [scripts/README.md](./scripts/README.md) — SSH, Wi-Fi, config
 
 Everything here assumes JetPack is already on the board. If you're starting from a fresh device, see **Prerequisites**.
 
@@ -48,20 +48,31 @@ Most tutorials assume you'll use a **DisplayPort monitor** for first-time setup 
 
 ## Documentation
 
-**Board setup** — guides and scripts for the foundation most [Jetson AI Lab](https://www.jetson-ai-lab.com/tutorials/) tutorials expect:
+**Scripts** — see **[scripts/README.md](./scripts/README.md)** (overview), **[scripts/host/README.md](./scripts/host/README.md)** (laptop), **[scripts/edge/README.md](./scripts/edge/README.md)** (Jetson).
 
-| Guide | Script |
-|-------|--------|
-| [docs/remote-access.md](./docs/remote-access.md) | [`scripts/enable-ssh.sh`](./scripts/enable-ssh.sh) |
-| [docs/jtop.md](./docs/jtop.md) | [`scripts/install-jtop.sh`](./scripts/install-jtop.sh) |
-| [docs/power-display.md](./docs/power-display.md) | [`scripts/max-performance.sh`](./scripts/max-performance.sh), [`scripts/set-headless.sh`](./scripts/set-headless.sh) |
-| [docs/sshfs.md](./docs/sshfs.md) | [`scripts/mount-jetson.sh`](./scripts/mount-jetson.sh) |
+```
+scripts/
+  config.sh              # board IP and SSH user
+  host/                  # run from laptop
+  edge/                  # run on Jetson
+```
 
-**Tutorial progress** — [docs/tutorials.md](./docs/tutorials.md) (links to Jetson AI Lab and other sources)
+| Script | Folder | Purpose |
+|--------|--------|---------|
+| [`scripts/config.sh`](./scripts/config.sh) | root | Board IP, USB IP, SSH user |
+| [`scripts/host/install`](./scripts/host/install) | host | `chmod +x` host scripts |
+| [`scripts/host/uninstall`](./scripts/host/uninstall) | host | Remove Edge repo clone from host |
+| [`scripts/host/remote_ssh`](./scripts/host/remote_ssh) | host | SSH into the Jetson |
+| [`scripts/edge/install`](./scripts/edge/install) | edge | Set up edge bundle on Jetson |
+| [`scripts/edge/uninstall`](./scripts/edge/uninstall) | edge | Scan and remove all edge bundles on Jetson |
+| [`scripts/edge/connect_wifi`](./scripts/edge/connect_wifi) | edge | Connect board to Wi-Fi |
+| [`scripts/edge/`](./scripts/edge/) | edge | Scripts that run on the board |
 
-Edit [`scripts/config.sh`](./scripts/config.sh) to set your board IP and user before running host-side scripts.
+**Reference** — [docs/jetson-config-command.txt](./docs/jetson-config-command.txt) (raw command notes: jtop, nvpmodel, sshfs, etc.)
 
-Full index: **[docs/README.md](./docs/README.md)**
+**Modules** — hardware notes as I add them: [`module/`](./module/) (camera, gimbal, power supply)
+
+**Tutorials I follow** — [Jetson AI Lab](https://www.jetson-ai-lab.com/tutorials/)
 
 ## License
 
