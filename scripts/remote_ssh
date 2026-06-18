@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# SSH into the Jetson from your host machine.
+#
+# Usage:
+#   ./remote_ssh [name] [usb] [-X]
+#
+#   ./remote_ssh              # edge@192.168.1.28 (LAN)
+#   ./remote_ssh edge         # explicit device user
+#   ./remote_ssh edge usb     # edge@192.168.55.1 (USB)
+#   ./remote_ssh -X           # X11 forwarding
+#   ./remote_ssh edge usb -X
+#
+# Override defaults:
+#   BOARD_IP=192.168.1.28 ./remote_ssh jetson
+
+set -euo pipefail
+
+BOARD_USER="${BOARD_USER:-edge}"
+BOARD_IP_LAN="${BOARD_IP:-192.168.1.28}"
+BOARD_IP_USB="${BOARD_IP_USB:-192.168.55.1}"
+
+target="lan"
+ssh_opts=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    usb)  target="usb" ;;
+    -X|x11) ssh_opts+=(-X) ;;
+    -n|--name)
+      [[ $# -lt 2 ]] && { echo "Missing value for $1" >&2; exit 1; }
+      BOARD_USER="$2"
+      shift
+      ;;
+    -h|--help)
+      sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $1 (try --help)" >&2
+      exit 1
+      ;;
+    *)
+      BOARD_USER="$1"
+      ;;
+  esac
+  shift
+done
+
+ip="$BOARD_IP_LAN"
+[[ "$target" == "usb" ]] && ip="$BOARD_IP_USB"
+
+echo "Connecting to ${BOARD_USER}@${ip} ..."
+exec ssh "${ssh_opts[@]}" "${BOARD_USER}@${ip}"
