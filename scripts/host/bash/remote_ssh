@@ -16,8 +16,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPTS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-# shellcheck source=../config.sh
+SCRIPTS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=../../config.sh
 source "$SCRIPTS_ROOT/config.sh"
 
 target="lan"

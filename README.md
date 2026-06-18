@@ -53,10 +53,12 @@ Most tutorials assume you'll use a **DisplayPort monitor** for first-time setup 
 ```
 scripts/
   config.sh
-  catalog.list           # injected edge scripts
+  catalog.list
   host/
-  edge/                  # scripts that run on the Jetson only
-    connect_wifi
+    bash/                # install, inject, reject, remote_ssh, uninstall
+    function/helper.sh
+  edge/
+    connect_wifi         # runs on Jetson after inject
 ```
 
 **Reference** — [docs/jetson-config-command.txt](./docs/jetson-config-command.txt) (jtop, nvpmodel, sshfs, etc.)
