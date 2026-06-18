@@ -49,9 +49,15 @@ connect_network() {
   local ssid="$1"
   local password="$2"
   echo "Connecting to \"${ssid}\" ..."
-  sudo nmcli device wifi connect "$ssid" password "$password"
-  echo "Connected. IP address:"
-  hostname -I
+  if sudo nmcli device wifi connect "$ssid" password "$password"; then
+    echo "Success: connected to \"${ssid}\"."
+    echo "IP address:"
+    hostname -I
+  else
+    echo "Failed: could not connect to \"${ssid}\"." >&2
+    echo "Check SSID, password, and signal strength, then try again." >&2
+    exit 1
+  fi
 }
 
 interactive_pick() {

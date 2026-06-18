@@ -8,8 +8,9 @@ on-Boot ssh :   sudo systemctl enable ssh
 
 -- Connect wifi
 Wifi Network: 	nmcli device wifi list
-Wifi Info   :   netsh wlan show profile name=" ", key=clear
-Wifi Connect:	sudo nmcli device wifi connect " " password " "
+Wifi Info   :   nmcli --show-secrets connection show "<SSID>" | grep -i psk
+		# Windows host only: netsh wlan show profile name="<SSID>" key=clear
+Wifi Connect:	sudo nmcli device wifi connect "<SSID>" password "<password>"
 
 --- Remote ssh
 host IP info:   hostname -I
