@@ -1,0 +1,4 @@
+# Catalog — edge scripts injected onto the Jetson (name + install path).
+# Updated by inject / reject. Source: scripts/edge/<name>
+#
+# Format:  name  edge_path

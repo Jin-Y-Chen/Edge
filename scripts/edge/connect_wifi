@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Connect this Jetson to Wi-Fi. Run on the edge terminal.
+# Connect this Jetson to Wi-Fi. Run on the edge device.
 #
 #   ./connect_wifi              # scan, pick network, enter password
 #   ./connect_wifi list         # show scan table

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+# Inject an edge script from scripts/edge/ onto the Jetson.
+#
+#   ./inject <name> [usb]       e.g. ./inject connect_wifi usb
+#
+# Updates scripts/catalog.list on the host.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=../config.sh
+source "$SCRIPTS_ROOT/config.sh"
+# shellcheck source=function/helper.sh
+source "$SCRIPT_DIR/function/helper.sh"
+
+CATALOG="${SCRIPTS_ROOT}/catalog.list"
+
+target="lan"
+NAME=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    usb) target="usb" ;;
+    -h|--help)
+      cat <<'EOF'
+Inject an edge script onto the Jetson from the host.
+
+  ./inject <name> [usb]       e.g. ./inject connect_wifi
+
+Source: scripts/edge/<name>
+Updates scripts/catalog.list on the host.
+EOF
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $1 (try --help)" >&2
+      exit 1
+      ;;
+    *)
+      [[ -z "$NAME" ]] && NAME="$1" || { echo "Unexpected argument: $1" >&2; exit 1; }
+      ;;
+  esac
+  shift
+done
+
+[[ -n "$NAME" ]] || {
+  echo "Usage: ./inject <name> [usb]" >&2
+  echo "Edge scripts:" >&2
+  list_edge_scripts "$SCRIPTS_ROOT" >&2 || true
+  if load_catalog "$CATALOG" 2>/dev/null; then
+    echo "In catalog:" >&2
+    list_catalog >&2
+  fi
+  exit 1
+}
+
+ip="$(board_ip "$target")"
+remote="${BOARD_USER}@${ip}"
+
+src="$(edge_script_source "$NAME" "$SCRIPTS_ROOT")" || {
+  echo "Edge script not found: scripts/edge/${NAME}" >&2
+  echo "Available:" >&2
+  list_edge_scripts "$SCRIPTS_ROOT" >&2
+  exit 1
+}
+
+edge_path_raw="$(resolve_catalog_path "$NAME" "$CATALOG")"
+
+echo "Injecting ${NAME} -> ${edge_path_raw} on ${remote} ..."
+ssh_board "mkdir -p ${edge_path_raw}" "$target"
+scp "$src" "${remote}:${edge_path_raw}/"
+ssh_board "chmod +x ${edge_path_raw}/${NAME}" "$target"
+add_catalog_entry "$CATALOG" "$NAME" "$edge_path_raw"
+
+echo "Injected ${NAME} -> ${edge_path_raw}"
+echo "Done. SSH in: ./host/remote_ssh edge ${target}"

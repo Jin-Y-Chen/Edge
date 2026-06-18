@@ -48,22 +48,16 @@ Most tutorials assume you'll use a **DisplayPort monitor** for first-time setup 
 
 ## Documentation
 
-**Scripts** — see **[scripts/README.md](./scripts/README.md)** (overview), **[scripts/host/README.md](./scripts/host/README.md)** (laptop), **[scripts/edge/README.md](./scripts/edge/README.md)** (Jetson).
+**Scripts** — see **[scripts/README.md](./scripts/README.md)** and **[scripts/host/README.md](./scripts/host/README.md)**.
 
 ```
 scripts/
-  config.sh              # board IP and SSH user
-  host/                  # run from laptop
-  edge/                  # run on Jetson
+  config.sh
+  catalog.list           # injected edge scripts
+  host/
+  edge/                  # scripts that run on the Jetson only
+    connect_wifi
 ```
-
-| Where | Scripts |
-|-------|---------|
-| [`scripts/`](./scripts/) | [`config.sh`](./scripts/config.sh) |
-| [`host/`](./scripts/host/) | [`install`](./scripts/host/install) · [`uninstall`](./scripts/host/uninstall) · [`remote_ssh`](./scripts/host/remote_ssh) |
-| [`edge/`](./scripts/edge/) | [`install`](./scripts/edge/install) · [`uninstall`](./scripts/edge/uninstall) · [`connect_wifi`](./scripts/edge/connect_wifi) |
-
-Details: [scripts/README.md](./scripts/README.md) · [host](./scripts/host/README.md) · [edge](./scripts/edge/README.md)
 
 **Reference** — [docs/jetson-config-command.txt](./docs/jetson-config-command.txt) (jtop, nvpmodel, sshfs, etc.)
 

@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Reject (remove) injected solutions from the edge device.
+#
+#   ./reject <name> [usb]     remove one solution
+#   ./reject --all [usb]      reject every entry in catalog.list
+#   ./reject -all [usb]       same as --all
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# shellcheck source=../config.sh
+source "$SCRIPTS_ROOT/config.sh"
+# shellcheck source=function/helper.sh
+source "$SCRIPT_DIR/function/helper.sh"
+
+CATALOG="${SCRIPTS_ROOT}/catalog.list"
+
+target="lan"
+MODE="one"
+NAME=""
+AUTO_CONFIRM=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    usb) target="usb" ;;
+    --all|-all) MODE="all" ;;
+    -y|--yes) AUTO_CONFIRM=1 ;;
+    -h|--help)
+      cat <<'EOF'
+Reject injected solutions from the edge device.
+
+  ./reject <name> [usb]     remove one solution by name
+  ./reject --all [usb]      reject all entries in catalog.list
+  ./reject -all [usb]       same as --all
+
+Updates scripts/catalog.list on the host.
+EOF
+      exit 0
+      ;;
+    -*)
+      echo "Unknown option: $1 (try --help)" >&2
+      exit 1
+      ;;
+    *)
+      [[ -z "$NAME" ]] && NAME="$1" || { echo "Unexpected argument: $1" >&2; exit 1; }
+      ;;
+  esac
+  shift
+done
+
+reject_one() {
+  local name="$1"
+  local path_raw
+
+  path_raw="$(catalog_path_raw "$name" "$CATALOG")" || {
+    echo "Not in catalog: ${name}" >&2
+    exit 1
+  }
+
+  if [[ $AUTO_CONFIRM -ne 1 ]]; then
+    read -rp "Reject '${name}' at ${path_raw} on edge? [y/N] " confirm
+    [[ "${confirm,,}" == "y" || "${confirm,,}" == "yes" ]] || { echo "Cancelled."; exit 0; }
+  fi
+
+  ssh_board "rm -rf ${path_raw}" "$target"
+  remove_catalog_entry "$CATALOG" "$name"
+  echo "Rejected ${name} (${path_raw})"
+}
+
+reject_all() {
+  if load_catalog "$CATALOG" 2>/dev/null; then
+    echo "Catalog entries to reject:"
+    list_catalog
+    echo ""
+  else
+    echo "Catalog is empty (${CATALOG})."
+  fi
+
+  if [[ $AUTO_CONFIRM -ne 1 ]]; then
+    read -rp "Reject all injected solutions on edge? [y/N] " confirm
+    [[ "${confirm,,}" == "y" || "${confirm,,}" == "yes" ]] || { echo "Cancelled."; exit 0; }
+  fi
+
+  if load_catalog "$CATALOG" 2>/dev/null; then
+    local i
+    for i in "${!CATALOG_NAMES[@]}"; do
+      ssh_board "rm -rf ${CATALOG_PATHS[$i]}" "$target"
+      echo "Rejected ${CATALOG_NAMES[$i]} (${CATALOG_PATHS[$i]})"
+    done
+  fi
+
+  clear_catalog "$CATALOG"
+  echo "Cleared ${CATALOG}."
+}
+
+if [[ "$MODE" == "all" ]]; then
+  reject_all
+elif [[ -n "$NAME" ]]; then
+  reject_one "$NAME"
+else
+  echo "Usage: ./reject <name> [usb] | ./reject --all [usb]" >&2
+  exit 1
+fi
