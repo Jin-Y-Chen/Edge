@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Shared helpers for host inject / reject / uninstall.
 
+trim_catalog_line() {
+  local line="$1"
+  line="${line//$'\r'/}"
+  line="${line%%#*}"
+  line="${line#"${line%%[![:space:]]*}"}"
+  line="${line%"${line##*[![:space:]]}"}"
+  printf '%s' "$line"
+}
+
 expand_path() {
   local path="$1"
   if [[ "$path" == "~" ]]; then
@@ -31,9 +40,7 @@ load_catalog() {
 
   local line name path
   while IFS= read -r line || [[ -n "$line" ]]; do
-    line="${line%%#*}"
-    line="${line#"${line%%[![:space:]]*}"}"
-    line="${line%"${line##*[![:space:]]}"}"
+    line="$(trim_catalog_line "$line")"
     [[ -z "$line" ]] && continue
 
     name="${line%%[[:space:]]*}"
@@ -44,6 +51,8 @@ load_catalog() {
     CATALOG_NAMES+=("$name")
     CATALOG_PATHS+=("$path")
   done < "$file"
+
+  [[ ${#CATALOG_NAMES[@]} -gt 0 ]]
 }
 
 list_catalog() {
@@ -60,9 +69,7 @@ catalog_path_raw() {
 
   [[ -f "$file" ]] || return 1
   while IFS= read -r line || [[ -n "$line" ]]; do
-    line_trim="${line%%#*}"
-    line_trim="${line_trim#"${line_trim%%[![:space:]]*}"}"
-    line_trim="${line_trim%"${line_trim##*[![:space:]]}"}"
+    line_trim="$(trim_catalog_line "$line")"
     [[ -z "$line_trim" ]] && continue
     name="${line_trim%%[[:space:]]*}"
     path="${line_trim#"$name"}"
@@ -73,10 +80,7 @@ catalog_path_raw() {
 }
 
 default_catalog_path() {
-  case "$1" in
-    connect_wifi) echo "~/edge-scripts" ;;
-    *) echo "~/edge-${1}" ;;
-  esac
+  echo "${EDGE_ROOT:-~/Edge}"
 }
 
 resolve_catalog_path() {
@@ -100,9 +104,7 @@ add_catalog_entry() {
   : > "$tmp"
   grep '^#' "$file" >> "$tmp" 2>/dev/null || true
   while IFS= read -r line || [[ -n "$line" ]]; do
-    line_trim="${line%%#*}"
-    line_trim="${line_trim#"${line_trim%%[![:space:]]*}"}"
-    line_trim="${line_trim%"${line_trim##*[![:space:]]}"}"
+    line_trim="$(trim_catalog_line "$line")"
     [[ -z "$line_trim" ]] && continue
     name2="${line_trim%%[[:space:]]*}"
     [[ "$name2" == "$name" ]] && continue
@@ -125,9 +127,7 @@ remove_catalog_entry() {
   : > "$tmp"
   grep '^#' "$file" >> "$tmp" 2>/dev/null || true
   while IFS= read -r line || [[ -n "$line" ]]; do
-    line_trim="${line%%#*}"
-    line_trim="${line_trim#"${line_trim%%[![:space:]]*}"}"
-    line_trim="${line_trim%"${line_trim##*[![:space:]]}"}"
+    line_trim="$(trim_catalog_line "$line")"
     [[ -z "$line_trim" ]] && continue
     name="${line_trim%%[[:space:]]*}"
     [[ "$name" == "$target" ]] && continue
@@ -142,6 +142,59 @@ clear_catalog() {
   local file="$1"
   grep '^#' "$file" > "${file}.tmp" 2>/dev/null || : > "${file}.tmp"
   mv "${file}.tmp" "$file"
+}
+
+reject_all_on_edge() {
+  local catalog="$1"
+  local target="${2:-lan}"
+  local auto_confirm="${3:-0}"
+  local paths=()
+  local path existing i
+
+  add_reject_path() {
+    local candidate="$1"
+    [[ -z "$candidate" ]] && return
+    for existing in "${paths[@]}"; do
+      [[ "$existing" == "$candidate" ]] && return
+    done
+    paths+=("$candidate")
+  }
+
+  if load_catalog "$catalog"; then
+    echo "Catalog entries to reject:"
+    list_catalog
+    echo ""
+  else
+    echo "No catalog entries in ${catalog}."
+    echo ""
+  fi
+
+  if [[ "$auto_confirm" -ne 1 ]]; then
+    read -rp "Reject all injected solutions on edge? [y/N] " confirm
+    [[ "${confirm,,}" == "y" || "${confirm,,}" == "yes" ]] || { echo "Cancelled."; return 1; }
+  fi
+
+  if load_catalog "$catalog"; then
+    for i in "${!CATALOG_NAMES[@]}"; do
+      add_reject_path "${CATALOG_PATHS[$i]}"
+    done
+  fi
+  add_reject_path "${EDGE_ROOT:-~/Edge}"
+
+  if [[ ${#paths[@]} -eq 0 ]]; then
+    echo "Nothing to remove on edge."
+  else
+    for path in "${paths[@]}"; do
+      if ssh_board "rm -rf ${path}" "$target"; then
+        echo "Removed ${path} on edge."
+      else
+        echo "Warning: could not remove ${path} on edge." >&2
+      fi
+    done
+  fi
+
+  clear_catalog "$catalog"
+  echo "Cleared ${catalog}."
 }
 
 edge_script_source() {

@@ -2,12 +2,10 @@
 
 ```
 scripts/
-  config.sh
-  catalog.list        # injected edge scripts (inject/reject)
-  host/
-    bash/             # install, inject, reject, remote_ssh, uninstall
-    function/         # helper.sh
-  edge/               # scripts that run on the Jetson only
+  config.sh             # BOARD_* + EDGE_ROOT (~/Edge on Jetson)
+  catalog.list          # injected edge scripts (inject/reject)
+  host/                 # install, inject, reject, remote_ssh, uninstall
+  edge/                 # scripts that run on the Jetson only
     connect_wifi
 ```
 
@@ -17,10 +15,10 @@ scripts/
 
 ```bash
 cd ~/Documents/Github/Edge/scripts
-./host/bash/install && nano config.sh
-./host/bash/inject connect_wifi usb
-./host/bash/remote_ssh edge usb
-cd ~/edge-scripts && ./connect_wifi
+./host/install && nano config.sh
+./host/inject connect_wifi usb
+./host/remote_ssh edge usb
+cd ~/Edge && ./connect_wifi
 ```
 
 ---
@@ -29,23 +27,23 @@ cd ~/edge-scripts && ./connect_wifi
 
 | Command | What it does |
 |---------|----------------|
-| `./host/bash/install` | chmod host scripts |
-| `./host/bash/inject <name> [usb]` | inject edge script + update catalog |
-| `./host/bash/reject <name> [usb]` | remove from edge + catalog |
-| `./host/bash/reject --all [usb]` | reject all + clear catalog |
-| `./host/bash/remote_ssh edge [usb]` | SSH into Jetson |
-| `source ./host/bash/uninstall [usb]` | reject all on edge + delete host repo |
+| `./host/install` | chmod host scripts |
+| `./host/inject <name> [usb]` | inject edge script into `~/Edge` + update catalog |
+| `./host/reject <name> [usb]` | remove from edge + catalog |
+| `./host/reject --all [usb]` | reject all + clear catalog |
+| `./host/remote_ssh edge [usb]` | SSH into Jetson |
+| `source ./host/uninstall [usb]` | reject all on edge + delete host repo |
 
 ---
 
 ## `edge/`
 
-Scripts here run **only on the Jetson**.
+Scripts here run **only on the Jetson** (injected to `~/Edge`).
 
 | Script | Purpose |
 |--------|---------|
 | `connect_wifi` | Scan, pick, and connect to Wi-Fi |
 
-Add to `edge/`, then `./host/bash/inject <name>`.
+Add to `edge/`, then `./host/inject <name>`.
 
 [← Host README](./host/README.md)

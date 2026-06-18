@@ -75,4 +75,4 @@ ssh_board "chmod +x ${edge_path_raw}/${NAME}" "$target"
 add_catalog_entry "$CATALOG" "$NAME" "$edge_path_raw"
 
 echo "Injected ${NAME} -> ${edge_path_raw}"
-echo "Done. SSH in: ./host/bash/remote_ssh edge ${target}"
+echo "Done. SSH in: ./host/remote_ssh edge ${target}"

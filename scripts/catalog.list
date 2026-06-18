@@ -2,3 +2,4 @@
 # Updated by inject / reject. Source: scripts/edge/<name>
 #
 # Format:  name  edge_path
+# Example: connect_wifi  ~/Edge

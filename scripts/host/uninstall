@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Full teardown: reject all injections on edge, then delete host repo clone.
 #
-#   source ./host/bash/uninstall [usb]   # recommended — returns shell to $HOME
-#   ./host/bash/uninstall [usb]
+#   source ./host/uninstall [usb]   # required — cd ~ applies to your shell
+#   ./host/uninstall [usb]
 
 set -euo pipefail
 
@@ -14,6 +14,10 @@ REPO_NAME="$(basename "$REPO_ROOT")"
 
 # shellcheck source=../../config.sh
 source "$SCRIPTS_ROOT/config.sh"
+# shellcheck source=../function/helper.sh
+source "$HOST_ROOT/function/helper.sh"
+
+CATALOG="${SCRIPTS_ROOT}/catalog.list"
 
 target="lan"
 [[ "${1:-}" == "usb" ]] && target="usb"
@@ -29,7 +33,7 @@ echo ""
 read -rp "Reject everything injected on edge? [y/N] " confirm_edge
 [[ "${confirm_edge,,}" == "y" || "${confirm_edge,,}" == "yes" ]] || { echo "Cancelled."; exit 0; }
 
-bash "$SCRIPT_DIR/reject" -y --all "$target"
+reject_all_on_edge "$CATALOG" "$target" 1
 
 echo ""
 echo "Step 2 — Host"
@@ -37,20 +41,16 @@ echo "  The Edge repo clone will be deleted:"
 echo "    ${REPO_ROOT}"
 echo ""
 read -rp "Delete host repo clone? [y/N] " confirm_host
-[[ "${confirm_host,,}" == "y" || "${confirm_host,,}" == "yes" ]] || { echo "Edge cleaned. Host repo kept."; exit 0; }
+if [[ "${confirm_host,,}" != "y" && "${confirm_host,,}" != "yes" ]]; then
+  echo "Edge cleaned. Host repo kept."
+  cd ~
+  exit 0
+fi
 
 (
   cd "$(dirname "$REPO_ROOT")"
   rm -rf "$REPO_NAME"
 )
 
-cd "$HOME"
+cd ~
 echo "Host repo removed."
-echo "Current directory: $HOME"
-
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  echo ""
-  echo "Your shell may still be inside the deleted repo."
-  echo "Run:  cd ~"
-  echo "Or use:  source ./host/bash/uninstall"
-fi

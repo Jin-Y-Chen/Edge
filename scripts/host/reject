@@ -70,29 +70,7 @@ reject_one() {
 }
 
 reject_all() {
-  if load_catalog "$CATALOG" 2>/dev/null; then
-    echo "Catalog entries to reject:"
-    list_catalog
-    echo ""
-  else
-    echo "Catalog is empty (${CATALOG})."
-  fi
-
-  if [[ $AUTO_CONFIRM -ne 1 ]]; then
-    read -rp "Reject all injected solutions on edge? [y/N] " confirm
-    [[ "${confirm,,}" == "y" || "${confirm,,}" == "yes" ]] || { echo "Cancelled."; exit 0; }
-  fi
-
-  if load_catalog "$CATALOG" 2>/dev/null; then
-    local i
-    for i in "${!CATALOG_NAMES[@]}"; do
-      ssh_board "rm -rf ${CATALOG_PATHS[$i]}" "$target"
-      echo "Rejected ${CATALOG_NAMES[$i]} (${CATALOG_PATHS[$i]})"
-    done
-  fi
-
-  clear_catalog "$CATALOG"
-  echo "Cleared ${CATALOG}."
+  reject_all_on_edge "$CATALOG" "$target" "$AUTO_CONFIRM"
 }
 
 if [[ "$MODE" == "all" ]]; then

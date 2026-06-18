@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Make all scripts in host/bash/ executable.
+# Make all scripts in host/ executable.
 #
 # First time after clone:
-#   chmod +x host/bash/install
-#   ./host/bash/install
+#   chmod +x host/install
+#   ./host/install
 #
-# Or without chmod: bash host/bash/install
+# Or without chmod: bash host/install
 
 set -euo pipefail
 
@@ -15,7 +15,7 @@ for file in "$SCRIPT_DIR"/*; do
   [[ -f "$file" ]] || continue
   name="$(basename "$file")"
   chmod +x "$file"
-  echo "chmod +x host/bash/$name"
+  echo "chmod +x host/$name"
 done
 
 echo "Host install done."

@@ -54,11 +54,9 @@ Most tutorials assume you'll use a **DisplayPort monitor** for first-time setup 
 scripts/
   config.sh
   catalog.list
-  host/
-    bash/                # install, inject, reject, remote_ssh, uninstall
-    function/helper.sh
+  host/                  # install, inject, reject, remote_ssh, uninstall
   edge/
-    connect_wifi         # runs on Jetson after inject
+    connect_wifi         # runs on Jetson at ~/Edge after inject
 ```
 
 **Reference** — [docs/jetson-config-command.txt](./docs/jetson-config-command.txt) (jtop, nvpmodel, sshfs, etc.)
