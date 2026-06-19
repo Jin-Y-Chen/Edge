@@ -12,6 +12,14 @@ Wifi Info   :   nmcli --show-secrets connection show "<SSID>" | grep -i psk
 		# Windows host only: netsh wlan show profile name="<SSID>" key=clear
 Wifi Connect:	sudo nmcli device wifi connect "<SSID>" password "<password>"
 
+
+
+
+
+
+
+
+
 --- Remote ssh
 host IP info:   hostname -I
 remote ssh  :	ssh -X edge@192.168.1.28

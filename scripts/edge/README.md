@@ -1,236 +1,121 @@
 # Edge scripts
 
-These scripts run **on the Jetson**, not on your host. The host copies them to `~/Edge` (or `EDGE_ROOT`) via `./host/inject <name>`. You SSH in and run them manually when needed.
+## Spawns
 
-## Layout
-
-```
-scripts/edge/
-  connect_wifi      # Wi-Fi setup + enable SSH on boot
-  default_setup     # pip + jetson-stats (jtop)
-  README.md         # this file
-```
-
-After inject, on the Jetson:
-
-```
-~/Edge/
-  connect_wifi
-  default_setup
-```
-
-## Architecture
-
-```
-  HOST                              EDGE (Jetson)
-  ────                              ─────────────
-
-  edge/connect_wifi  ──inject──►    ~/Edge/connect_wifi
-  edge/default_setup ──inject──►    ~/Edge/default_setup
-        │
-        │  # spawn lines (header)          │  you run:
-        ▼                                ▼
-  catalog.list                     sudo, apt, pip, nmcli, …
-  (logged at inject)               (only when you execute)
-```
-
-- **Inject** = deliver script + record metadata on the host.
-- **Run** = your choice on the Jetson; nothing runs automatically.
-- **Reject** = host reads `catalog.list` and undoes declared spawns + removes the script file.
-
-## Spawn declarations
-
-Side effects that a script *may* cause are declared in the script **header** as comments. At inject time, the host writes them to `catalog.list` under that script’s entry.
+Declared in each script header as `# spawn KIND ITEM`. The host reads them at inject and writes `> KIND ITEM` rows to `catalog.list`. They record what a script *might* install so reject knows what to remove. If the script was never run, reject skips anything not on the device.
 
 ```bash
-# spawn KIND ITEM
-# spawn KIND ITEM EXTRA
-```
-
-Supported kinds (used on reject/uninstall):
-
-| Kind | Catalog example | Teardown behavior |
-|------|-----------------|-------------------|
-| `apt` | `> apt python3-pip` | `apt-get remove` if package installed |
-| `pip` | `> pip jetson-stats` | `pip3 uninstall` if package installed |
-| `git` | `> git REPO /path/to/clone` | `rm -rf` clone path if present |
-| `dir` | `> dir NAME /path/to/dir` | `rm -rf` path if present |
-
-Injecting records spawns even if you never run the script. Reject skips removal for anything not actually on the device.
-
-### Example: `default_setup`
-
-```bash
-#!/usr/bin/env bash
-# Jetson first-run setup: install jtop.
 # spawn apt python3-pip
 # spawn pip jetson-stats
-set -euo pipefail
 ```
 
-After `./host/inject default_setup`, `catalog.list` contains:
+| Kind | Teardown (on reject) |
+|------|----------------------|
+| `apt` | `dpkg -s` check → `apt-get remove` |
+| `pip` | `pip3 show` check → `pip3 uninstall` |
+| `git` | `rm -rf` clone path if present |
+| `dir` | `rm -rf` path if present |
 
-```
-dd/mm/yy--HH:MM-- | default_setup  ~/Edge
-> apt  python3-pip
-> pip  jetson-stats
-```
-
-## Scripts
-
-### `connect_wifi`
-
-Connect the Jetson to Wi-Fi and enable SSH on boot after a successful connect.
-
-**Run on Jetson** (after inject):
-
-```bash
-cd ~/Edge
-./connect_wifi
-```
-
-Interactive — scans networks, you pick one, enter Wi-Fi password:
-
-```bash
-./connect_wifi
-```
-
-List networks only:
-
-```bash
-./connect_wifi list
-```
-
-Direct SSID + password:
-
-```bash
-./connect_wifi "MyNetwork" "MyWifiPassword"
-```
-
-**What it does**
-
-1. Prompts for sudo if needed.
-2. Connects via `nmcli`.
-3. Enables and starts `ssh` systemd service on boot.
-4. Prints LAN IP and reminds you to use `./host/remote_ssh` from the host.
-
-No `# spawn` lines — reject only removes the script file, not system packages.
+| Script | Spawns |
+|--------|--------|
+| `connect_wifi` | none |
+| `default_setup` | `apt python3-pip`, `pip jetson-stats` |
 
 ---
 
-### `default_setup`
+Run on the Jetson after the host injects them to `~/Edge`. Inject only copies the file — nothing runs until you SSH in and execute it.
 
-Install `python3-pip` and `jetson-stats` (jtop).
+Details: [host/README.md](../host/README.md) · Overview: [../README.md](../README.md)
 
-**Run on Jetson** (after inject):
+---
+
+## `connect_wifi`
+
+**Purpose** — Join Wi-Fi from the Jetson and enable SSH on boot so the host can reach it over LAN instead of USB.
+
+**Run**
+
+```bash
+cd ~/Edge
+./connect_wifi                  # scan, pick network, enter Wi-Fi password
+./connect_wifi list             # scan and print networks
+./connect_wifi "SSID" "pass"    # connect directly
+```
+
+**Raw commands**
+
+Scan (`list` or before interactive pick):
+
+```bash
+nmcli device wifi rescan
+sleep 2
+nmcli -t -f SSID,SIGNAL device wifi list   # deduped/sorted in script via awk
+nmcli device wifi list                      # list mode only
+```
+
+Connect (all modes that join a network):
+
+```bash
+sudo -v                                     # if sudo not cached
+nmcli radio wifi on
+sudo nmcli device wifi connect "SSID" password "pass"
+hostname -I | awk '{print $1}'              # print IP after success
+sudo systemctl enable ssh
+sudo systemctl start ssh
+```
+
+**Spawns** — none.
+
+**Reject removes** — `rm -f ~/Edge/connect_wifi` (from host via SSH). No packages or services undone.
+
+---
+
+## `default_setup`
+
+**Purpose** — Install pip and jetson-stats (jtop) on a fresh Jetson.
+
+**Run**
 
 ```bash
 cd ~/Edge
 ./default_setup
+sudo jtop    # after install
 ```
 
-Then:
+**Raw commands**
 
 ```bash
-sudo jtop
+sudo -v
+sudo apt install -y python3-pip
+sudo -H pip3 install -U jetson-stats
 ```
 
-**Declared spawns** (logged at inject, torn down on reject if installed):
+**Spawns** — `apt python3-pip`, `pip jetson-stats` (see top).
+
+**Reject removes** (from host, per catalog — only if present on device)
 
 ```bash
-# spawn apt python3-pip
-# spawn pip jetson-stats
+dpkg -s python3-pip && sudo apt-get remove -y --purge python3-pip
+pip3 show jetson-stats && sudo pip3 uninstall -y jetson-stats
+rm -f ~/Edge/default_setup
 ```
 
-## Full example session
+---
 
-### Host
+## Adding a script
 
-```bash
-cd scripts
-./host/install
-nano config.sh
+1. Create `scripts/edge/<name>` with `# spawn` lines for anything reject should track.
+2. Inject: `./host/inject <name>`
+3. Run on Jetson: `cd ~/Edge && ./<name>`
 
-./host/inject connect_wifi
-./host/inject default_setup
-./host/catalog list
-./host/remote_ssh
-```
-
-Expected catalog:
-
-```
-dd/mm/yy--HH:MM-- | connect_wifi  ~/Edge
-dd/mm/yy--HH:MM-- | default_setup  ~/Edge
-> apt  python3-pip
-> pip  jetson-stats
-```
-
-### Jetson (over USB or existing SSH)
-
-```bash
-cd ~/Edge
-./connect_wifi
-# pick network, enter Wi-Fi password
-
-./default_setup
-# enter sudo password when prompted
-
-sudo jtop
-```
-
-### Host again (after Wi-Fi — LAN SSH)
-
-```bash
-./host/remote_ssh
-```
-
-### Remove setup from edge (keep connect_wifi)
-
-```bash
-./host/reject default_setup
-```
-
-Removes `~/Edge/default_setup`, attempts to remove `python3-pip` and `jetson-stats` if present, updates catalog.
-
-## Adding a new edge script
-
-1. Create `scripts/edge/my_script` (executable bash).
-2. Add `# spawn` lines in the header for any apt/pip/git/dir side effects.
-3. Inject from host:
-
-```bash
-./host/inject my_script
-```
-
-4. SSH to Jetson and run:
-
-```bash
-cd ~/Edge
-./my_script
-```
-
-Template:
+Header template:
 
 ```bash
 #!/usr/bin/env bash
-# Short description.
-# spawn apt some-package
-# spawn pip some-pypi-name
+# what this does
+# spawn apt package-name
+# spawn pip pypi-name
 set -euo pipefail
-
-[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && {
-  echo "Usage: ./my_script"
-  exit 0
-}
-
-sudo -n true 2>/dev/null || { echo "Sudo password required."; sudo -v; }
-
-# your commands here
 ```
 
-## Notes
-
-- Edge scripts use **interactive sudo** — there is no password file on the Jetson from this repo.
-- `# spawn` lines are comments only on the Jetson; the host reads them at inject time.
-- Do not rely on manual `scp` to `~/Edge` if you want catalog/reject to work — always use `./host/inject`.
+Edge scripts use interactive sudo — no password file on the Jetson from this repo. Use `./host/inject` (not manual `scp`) if catalog and reject should stay in sync.
