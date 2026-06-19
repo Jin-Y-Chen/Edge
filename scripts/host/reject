@@ -2,7 +2,7 @@
 # Usage: ./reject <name> | ./reject --all [-y]
 set -euo pipefail
 
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/helper.sh"
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/host.sh"
 host_init "${BASH_SOURCE[0]}"
 
 MODE="" NAME="" YES=0

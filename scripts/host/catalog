@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Usage: ./catalog list
+set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/host.sh"
+host_init "${BASH_SOURCE[0]}"
+
+[[ "${1:-list}" == "-h" || "${1:-list}" == "--help" ]] && {
+  echo "Usage: ./catalog list"
+  exit 0
+}
+
+case "${1:-list}" in
+  list|ls)
+    echo "Catalog log:"
+    list_catalog "$CATALOG"
+    ;;
+  *)
+    die "Usage: ./catalog list"
+    ;;
+esac

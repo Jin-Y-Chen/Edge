@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Jetson first-run setup: install jtop.
+# spawn apt python3-pip
+# spawn pip jetson-stats
+set -euo pipefail
+
+[[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && {
+  echo "Usage: ./default_setup"
+  exit 0
+}
+
+sudo -n true 2>/dev/null || { echo "Sudo password required."; sudo -v; }
+
+echo "Installing pip ..."
+sudo apt install -y python3-pip
+
+echo "Installing jtop (jetson-stats) ..."
+sudo -H pip3 install -U jetson-stats
+
+echo "Done. Run: sudo jtop"

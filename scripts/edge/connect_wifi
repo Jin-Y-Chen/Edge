@@ -26,9 +26,14 @@ connect() {
     [[ -n "$out" ]] && echo "$out" >&2
     return 1
   fi
-  echo "Success: connected to \"${ssid}\"."
-  [[ -n "$out" ]] && echo "$out"
-  echo "IP: $(hostname -I || true)"
+  local ip
+  ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  sudo systemctl enable ssh
+  sudo systemctl start ssh
+  echo ""
+  echo "Wi-Fi connected to \"${ssid}\"${ip:+ (${ip})}."
+  echo "SSH enabled on boot."
+  echo "From your host: bash remote_ssh; now via LAN instead of USB."
 }
 
 pick_and_connect() {

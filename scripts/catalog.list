@@ -1,3 +1,6 @@
-# Catalog — injected edge scripts (name + path on Jetson).
-# Format:  name  path
-# Example: connect_wifi  ~/Edge
+# Catalog log — injected scripts and declared spawns (host source of truth).
+# Entry:  dd/mm/yy--HH:MM-- | SCRIPT  PATH
+# Spawn:  > KIND  ITEM  [EXTRA]   (# spawn lines in edge/SCRIPT, logged at inject)
+19/06/26--00:21-- | default_setup  ~/Edge
+> apt  python3-pip
+> pip  jetson-stats
