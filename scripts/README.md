@@ -2,11 +2,6 @@
 
 Host-managed ops for the Jetson: scripts live on the laptop, get injected to the edge, run manually on the device, and `catalog.list` tracks what reject/uninstall should remove.
 
-| Area | Doc |
-|------|-----|
-| Host commands (`inject`, `reject`, SSH, …) | [host/README.md](./host/README.md) |
-| Edge scripts (what runs on the Jetson) | [edge/README.md](./edge/README.md) |
-
 ## Layout
 
 ```
