@@ -64,11 +64,10 @@ Spawns come from `# spawn KIND ITEM` comments in the edge script header — logg
 
 | Command | Where | Purpose |
 |---------|-------|---------|
+| `cat catalog.list` | host | view inject log for reject/uninstall |
 | `./host/install` | host | `chmod +x` host scripts |
 | `./host/inject <name>` | host | copy to Jetson + catalog |
 | `./host/reject <name>` | host | remove script + spawns |
-| `./host/reject --all` | host | remove all entries |
-| `cat catalog.list` | host | view inject log for reject/uninstall |
 | `./host/remote_ssh` | host | SSH to Jetson |
 | `./host/remote_sshfs` | host | sshfs mount Jetson root |
 | `./host/uninstall` | host | reject all + delete repo |
