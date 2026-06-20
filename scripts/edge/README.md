@@ -6,6 +6,8 @@ Declared in each script header as `# spawn KIND ITEM`. The host reads them at in
 
 **Why spawns exist.** Inject only copies a script to `~/Edge`; it does not run it. When a script eventually runs, it may install packages with `apt` or `pip`, clone repos, or create directories on the Jetson. The host cannot observe that automatically. Spawn lines declare those side effects up front so `reject` and `uninstall` can tear them down later: not only the script file, but also the system changes the script was designed to make. Inject logs spawns even if the script was never executed. On reject, anything not present on the device is skipped.
 
+**Declare only non-default installs.** JetPack already ships tools like `git`. Do not add `# spawn apt git` — reject must not remove base image packages. Scripts may still run `apt install git` as a fallback if missing.
+
 ```bash
 # spawn apt python3-pip
 # spawn pip jetson-stats
@@ -24,7 +26,8 @@ Reject runs spawns in order: **pip → git/dir → apt → post-cleanup**.
 | Script | Spawns |
 |--------|--------|
 | `connect_wifi` | none |
-| `default_setup` | `apt python3-pip`, `apt git`, `pip jetson-stats`, `git jetson_stats ~/jetson_stats` |
+| `default_setup` | `apt python3-pip`, `pip jetson-stats`, `git jetson_stats ~/jetson_stats` |
+| `device_skill` | `git jetson_device_skills ~/jetson_device_skills` |
 | `max_power` | none |
 
 ---
@@ -33,7 +36,7 @@ Run on the Jetson after the host injects them to `~/Edge`. Inject only copies th
 
 Details: [host/README.md](../host/README.md) · Overview: [../README.md](../README.md)
 
-**Why these scripts.** After flash, the Jetson is usually reached over USB at `192.168.55.x`. That works for first boot but is awkward for daily use. `connect_wifi` moves SSH to LAN Wi-Fi and keeps SSH enabled on boot. `default_setup` installs jtop. `max_power` sets max `nvpmodel`, `jetson_clocks`, fan cool profile, and optional headless boot before heavy workloads.
+**Why these scripts.** After flash, the Jetson is usually reached over USB at `192.168.55.x`. That works for first boot but is awkward for daily use. `connect_wifi` moves SSH to LAN Wi-Fi and keeps SSH enabled on boot. `default_setup` installs jtop. `device_skill` installs NVIDIA Jetson agent skills so Cursor knows how to work on this board. `max_power` sets max `nvpmodel`, `jetson_clocks`, fan cool profile, and optional headless boot before heavy workloads.
 
 ---
 
@@ -121,9 +124,10 @@ sudo systemctl restart jtop.service
 **Spawns**
 
 - `apt python3-pip`. Jetson images ship without a reliable pip install path. This apt package provides `pip3` for PyPI tools.
-- `apt git`. Needed to shallow-clone `jetson_stats` from GitHub.
 - `pip jetson-stats`. Installs `jtop` and `jtop.service` from the clone. Newer than PyPI and needed for recent L4T such as 36.5.0. jtop is the usual way to read board state in one terminal: `nvpmodel` power mode, `jetson_clocks` status, CPU/GPU load, RAM, swap, temperature, and fan. Install before changing performance settings or loading models. Most Jetson AI Lab flows assume it is available.
 - `git jetson_stats ~/jetson_stats`. Shallow clone of [rbonghi/jetson_stats](https://github.com/rbonghi/jetson_stats). pip installs from this directory, not `pip install git+https://...`.
+
+`git` is not spawned — it is part of JetPack; the script uses it but reject does not remove it.
 
 Logged at inject. See the Spawns section at the top. Reject removes each item only if it is present on the device.
 
@@ -138,10 +142,45 @@ sudo pip3 cache purge 2>/dev/null || sudo rm -rf ~/.cache/pip /root/.cache/pip
 sudo systemctl daemon-reload
 sudo rm -rf ~/jetson_stats
 dpkg -s python3-pip && sudo apt-get remove -y --purge python3-pip
-dpkg -s git && sudo apt-get remove -y --purge git
 sudo apt-get autoremove -y && sudo apt-get autoclean -y
 rm -f ~/Edge/default_setup
 ```
+
+---
+
+## `device_skill`
+
+**Purpose.** Install [NVIDIA jetson-device-skills](https://github.com/NVIDIA-AI-IOT/jetson-device-skills) for Cursor (and optionally Claude/Codex) — jtop for the agent, not you.
+
+It is the Jetson service manual. Without it, chat drifts to generic Linux advice. Skills cover diagnostics, memory tuning, headless setup, LLM serving, benchmarks, and package selection. This script only installs them; when you ask in chat, the agent runs scripts like `snapshot.sh` against live hardware.
+
+Connection via **Remote SSH** on Cursor allow the agents to read the skills from `~/.cursor/skills/` like other project folder on the board. 
+
+**Run on the Jetson.** The skills are distributed through the [jetson-device-skills](https://github.com/NVIDIA-AI-IOT/jetson-device-skills) repository and install into the Jetson user's `~/.cursor/skills/`.
+
+```bash
+cd ~/Edge
+./device_skill              # cursor (default)
+./device_skill all          # claude + codex + cursor
+./device_skill claude,cursor
+```
+
+**Raw commands**
+
+```bash
+sudo apt install -y git
+git clone --depth 1 https://github.com/NVIDIA-AI-IOT/jetson-device-skills.git ~/jetson_device_skills
+bash ~/jetson_device_skills/install.sh --targets cursor
+# restart Cursor agent session
+```
+
+**Spawns.**
+
+- `git jetson_device_skills ~/jetson_device_skills`. Shallow clone; `install.sh` symlinks skills into agent config dirs.
+
+**Reject removes.** Clone at `~/jetson_device_skills` and the script file. Symlinks in `~/.cursor/skills/jetson-*` (and other agent paths) are not removed — delete manually or re-run `./device_skill`.
+
+Reference: [Getting Started with Jetson — AI-Assisted Workflows](https://www.jetson-ai-lab.com/tutorials/getting-started-with-jetson/)
 
 ---
 

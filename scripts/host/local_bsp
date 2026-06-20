@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Host-side pre-flash: NVIDIA jetson-bsp-skills workspace (Linux_for_Tegra).
+# Opposite of remote_ssh — runs on your workstation, not the Jetson.
+set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/host.sh"
+host_init "${BASH_SOURCE[0]}"
+
+REPO_URL="https://github.com/NVIDIA-AI-IOT/jetson-bsp-skills.git"
+CLONE_DIR="${HOME}/jetson_bsp_skills"
+WORKSPACE="${BSP_WORKSPACE-${REPO_DIR}/jetson-image}"
+FORCE=0
+
+usage() {
+  cat <<EOF
+Usage: ./local_bsp [--workspace PATH] [--force]
+
+  Host-side BSP customization setup (pre-flash). Clones jetson-bsp-skills and
+  runs setup.sh, then links skills into .cursor/skills/ for Cursor (and .claude/
+  for Claude Code). Pair with remote_ssh for post-flash device work.
+
+  --workspace PATH  BSP workspace (default: ${REPO_DIR}/jetson-image)
+  --force           Rebuild workspace .claude/ if it already exists
+  -h, --help        Show this message
+
+  Env: BSP_WORKSPACE in scripts/config.sh overrides the default workspace path.
+
+  Next: cd <workspace>, open in your AI agent, and ask to set up the BSP
+  customization workspace (/jetson-quick-start).
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --workspace)
+      [[ $# -ge 2 ]] || { echo "local_bsp: --workspace requires a value" >&2; exit 2; }
+      WORKSPACE="$2"
+      shift 2
+      ;;
+    --force) FORCE=1; shift ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "local_bsp: unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [[ "$WORKSPACE" == "~/"* ]]; then
+  WORKSPACE="${HOME}/${WORKSPACE:2}"
+elif [[ "$WORKSPACE" == "~" ]]; then
+  WORKSPACE="$HOME"
+fi
+if [[ "$CLONE_DIR" == "~/"* ]]; then
+  CLONE_DIR="${HOME}/${CLONE_DIR:2}"
+elif [[ "$CLONE_DIR" == "~" ]]; then
+  CLONE_DIR="$HOME"
+fi
+
+command -v git >/dev/null || {
+  echo "local_bsp: git is required." >&2
+  exit 1
+}
+
+if [[ -d "${CLONE_DIR}/.git" ]]; then
+  echo "Updating jetson-bsp-skills ..."
+  git -C "$CLONE_DIR" pull --ff-only
+else
+  echo "Cloning jetson-bsp-skills to ${CLONE_DIR} ..."
+  rm -rf "$CLONE_DIR"
+  git clone --depth 1 "$REPO_URL" "$CLONE_DIR"
+fi
+
+[[ -f "${CLONE_DIR}/setup.sh" ]] || {
+  echo "local_bsp: setup.sh missing in ${CLONE_DIR}." >&2
+  exit 1
+}
+
+mkdir -p "$WORKSPACE"
+WORKSPACE="$(cd "$WORKSPACE" && pwd)"
+[[ -d "$CLONE_DIR" ]] && CLONE_DIR="$(cd "$CLONE_DIR" && pwd)"
+
+setup_args=(--workspace "$WORKSPACE")
+(( FORCE )) && setup_args+=(--force)
+
+echo "Initializing BSP workspace at ${WORKSPACE} ..."
+bash "${CLONE_DIR}/setup.sh" "${setup_args[@]}"
+
+# Cursor: mirror .claude skills/context/references into .cursor/ (setup.sh is Claude-only).
+CURSOR_DIR="${WORKSPACE}/.cursor"
+CLAUDE_DIR="${WORKSPACE}/.claude"
+mkdir -p "${CURSOR_DIR}/skills"
+for skill in "${CLAUDE_DIR}/skills"/jetson-*/; do
+  [[ -d "$skill" ]] || continue
+  name="$(basename "$skill")"
+  ln -sfn "../../.claude/skills/${name}" "${CURSOR_DIR}/skills/${name}"
+done
+ln -sfn "../.claude/context" "${CURSOR_DIR}/context"
+ln -sfn "../.claude/references" "${CURSOR_DIR}/references"
+
+cat <<EOF
+
+Done.
+  Clone:     ${CLONE_DIR}
+  Workspace: ${WORKSPACE}
+  Cursor:    ${CURSOR_DIR}/skills/ (jetson-*)
+
+Open ${WORKSPACE} in Cursor, start a new agent chat, and ask:
+  Help me set up the BSP customization workspace — /jetson-quick-start
+
+Reference: https://github.com/NVIDIA-AI-IOT/jetson-bsp-skills
+EOF

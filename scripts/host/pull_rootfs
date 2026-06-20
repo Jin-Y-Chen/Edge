@@ -1,0 +1,231 @@
+#!/usr/bin/env bash
+# Seed jetson-image/Image/Linux_for_Tegra/rootfs from the live Jetson rootfs.
+# Use when the board already runs the release you want to customize — skip re-downloading rootfs.
+set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/host.sh"
+host_init "${BASH_SOURCE[0]}"
+
+L4T_DIR="${REPO_DIR}/jetson-image/Image/Linux_for_Tegra"
+ROOTFS="${L4T_DIR}/rootfs"
+PROFILE="${REPO_DIR}/jetson-image/target-platform/jetson-orin-nano-8gb-devkit.yaml"
+
+STABLE=1
+confirm=1
+
+usage() {
+  cat <<EOF
+Usage: ./pull_rootfs [-y] [--fast]
+
+  Copy the running Jetson root filesystem into:
+    jetson-image/Image/Linux_for_Tegra/rootfs/
+
+  Default: stop services that write to disk, then run two full tar passes.
+  The second pass overwrites anything that changed during pass 1 — best live
+  snapshot without recovery mode.
+
+  --fast     Single tar pass only (faster; files may change mid-copy).
+
+  Reads L4T version from the device and records bsp_image in the active
+  target profile. Host-side flash tools (flash.sh) still come from NVIDIA
+  if you re-flash later.
+
+  Requires SSH to the Jetson (LAN/USB per config.sh).
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -y) confirm=0 ;;
+    --fast) STABLE=0 ;;
+    --stable) STABLE=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *) die "Unknown option: $1 (try --help)" ;;
+  esac
+  shift
+done
+
+pick_route || die "Could not reach board (LAN ${BOARD_IP}, USB ${BOARD_IP_USB})."
+board_session_begin "$BOARD_ROUTE"
+
+ip="${BOARD_USER}@$(board_ip "$BOARD_ROUTE")"
+timeout="$(board_timeout "$BOARD_ROUTE")"
+
+echo "Reading L4T release from ${ip} ..."
+tegra_release="$(board_ssh "cat /etc/nv_tegra_release 2>/dev/null | head -1" "$BOARD_ROUTE")"
+[[ -n "$tegra_release" ]] || die "Could not read /etc/nv_tegra_release on the Jetson."
+
+bsp_version="$(printf '%s\n' "$tegra_release" | sed -n 's/.*R\([0-9][0-9]*\).*REVISION: \([0-9.]*\).*/\1.\2/p')"
+[[ -n "$bsp_version" ]] || bsp_version="unknown"
+
+echo "Jetson release: ${tegra_release}"
+echo "BSP version:    ${bsp_version}"
+echo "Destination:    ${ROOTFS}"
+if (( STABLE )); then
+  echo "Mode:           stable (quiesce + two tar passes)"
+else
+  echo "Mode:           fast (single pass)"
+fi
+echo ""
+
+if (( confirm )); then
+  read -r -p "Replace ${ROOTFS} with a copy from the live Jetson? [y/N] " ans
+  [[ "${ans,,}" == "y" || "${ans,,}" == "yes" ]] || { echo "Aborted."; exit 0; }
+fi
+
+host_is_windows=0
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) host_is_windows=1 ;;
+esac
+
+use_sudo_s=0
+if ! board_ssh "sudo -n true" "$BOARD_ROUTE" 2>/dev/null; then
+  board_prompt_sudo_once
+  use_sudo_s=1
+fi
+
+quiesced=0
+quiesce_jetson() {
+  echo "Quiescing Jetson (stopping services that write to disk) ..."
+  board_ssh "sudo systemctl stop docker containerd jtop 2>/dev/null; \
+sudo killall apt apt-get dpkg unattended-upgrade 2>/dev/null; sync; true" "$BOARD_ROUTE"
+  quiesced=1
+}
+
+unquiesce_jetson() {
+  (( quiesced )) || return 0
+  echo "Restarting stopped services on Jetson ..."
+  board_ssh "sudo systemctl start docker containerd jtop 2>/dev/null; true" "$BOARD_ROUTE" 2>/dev/null || true
+  quiesced=0
+}
+trap unquiesce_jetson EXIT
+
+(( STABLE )) && quiesce_jetson
+
+rm -rf "$ROOTFS"
+mkdir -p "$ROOTFS"
+
+tar_create=(tar --warning=no-file-changed --numeric-owner -cpf - --one-file-system
+  --exclude=/proc
+  --exclude=/sys
+  --exclude=/dev
+  --exclude=/tmp
+  --exclude=/run
+  --exclude=/mnt
+  --exclude=/media
+  --exclude=/lost+found
+  --exclude=/snap
+  --exclude=/usr/src
+  --exclude=/var/cache
+  --exclude=/var/log
+  -C / .)
+
+if (( host_is_windows )); then
+  tar_create=(tar --warning=no-file-changed -h --numeric-owner -cpf - --one-file-system
+    --exclude=/proc
+    --exclude=/sys
+    --exclude=/dev
+    --exclude=/tmp
+    --exclude=/run
+    --exclude=/mnt
+    --exclude=/media
+    --exclude=/lost+found
+    --exclude=/snap
+    --exclude=/usr/src
+    --exclude=/var/cache
+    --exclude=/var/log
+    -C / .)
+  echo "Windows/MSYS host — dereferencing symlinks (WSL gives native symlinks)."
+fi
+
+remote_tar="${tar_create[*]}"
+
+est_bytes="$(board_ssh "df -B1 / | awk 'NR==2 {print \$3}'" "$BOARD_ROUTE" 2>/dev/null || echo 0)"
+if [[ -n "$est_bytes" && "$est_bytes" =~ ^[0-9]+$ && "$est_bytes" -gt 0 ]]; then
+  if command -v numfmt >/dev/null 2>&1; then
+    echo "Approx on-device size: $(numfmt --to=iec-i "$est_bytes")"
+  fi
+fi
+echo ""
+
+pull_progress_watch() {
+  local dest="$1" pid="$2" label="$3"
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ -d "$dest" ]]; then
+      local human
+      human="$(du -sh "$dest" 2>/dev/null | awk '{print $1}')"
+      printf '\r  %s: %-10s' "$label" "$human"
+    fi
+    sleep 2
+  done
+  printf '\n'
+}
+
+pull_tar_stream() {
+  local remote_cmd="$1" label="$2"
+  local extract=(tar --warning=no-file-changed --warning=no-timestamp -xpf - -C "$ROOTFS")
+  if (( host_is_windows )); then
+    extract=(tar --warning=no-file-changed --warning=no-timestamp --no-same-owner -xpf - -C "$ROOTFS")
+  fi
+  if (( use_sudo_s )); then
+    printf '%s\n' "$BOARD_SUDO_PASSWORD" | board_run_ssh "$ip" "${BOARD_SSH_PASSWORD:-}" "$timeout" \
+      "$remote_cmd" | "${extract[@]}" &
+  else
+    board_run_ssh "$ip" "${BOARD_SSH_PASSWORD:-}" "$timeout" \
+      "$remote_cmd" | "${extract[@]}" &
+  fi
+  local pull_pid=$!
+  pull_progress_watch "$ROOTFS" "$pull_pid" "$label"
+  wait "$pull_pid"
+}
+
+run_tar_pass() {
+  local label="$1"
+  echo "${label} ..."
+  if (( use_sudo_s )); then
+    pull_tar_stream "sudo -S -p '' ${remote_tar}" "$label" || return 1
+  else
+    pull_tar_stream "sudo ${remote_tar}" "$label" || return 1
+  fi
+}
+
+if (( STABLE )); then
+  run_tar_pass "Pass 1/2: tar from Jetson" || die "Pass 1 failed."
+  echo ""
+  run_tar_pass "Pass 2/2: tar from Jetson (refresh changed files)" || die "Pass 2 failed."
+else
+  echo "Pulling rootfs (Jetson stays running — some files may change mid-copy) ..."
+  echo ""
+  run_tar_pass "Copying" || die "Rootfs pull failed."
+fi
+
+unquiesce_jetson
+trap - EXIT
+board_session_end
+
+if [[ -f "$PROFILE" ]]; then
+  if grep -q '^bsp_image:' "$PROFILE" 2>/dev/null; then
+    echo "Profile already has bsp_image — update ${PROFILE} manually if needed."
+  else
+    cat >>"$PROFILE" <<YAML
+
+bsp_image:
+  version: "${bsp_version}"
+YAML
+    echo "Updated ${PROFILE} with bsp_image.version=${bsp_version}"
+  fi
+fi
+
+mode_msg="fast (single pass)"
+(( STABLE )) && mode_msg="stable (quiesced, two passes)"
+
+cat <<EOF
+
+Done.
+  Rootfs:  ${ROOTFS}
+  Version: ${bsp_version}
+  Mode:    ${mode_msg}
+
+Open jetson-image/ in Cursor. For re-flash you still need host Linux_for_Tegra
+from NVIDIA (jetson-download-bsp) plus recovery mode (pins 9–10) at flash time.
+EOF

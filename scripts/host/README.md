@@ -1,6 +1,12 @@
 # Host scripts
 
-Host-side entry points for managing the Jetson. Run them from `scripts/host/` on the laptop; each command reaches the board over SSH — LAN (`BOARD_IP`) first, USB (`BOARD_IP_USB`) if LAN is down. Board IP and user come from `config.sh`. Implementation is in `function/` (sourced library, not executed on its own).
+Host-side entry points for the Jetson workflow. Run from `scripts/host/` on your laptop.
+
+**Post-flash edition** — `inject`, `reject`, `remote_ssh`, `remote_sshfs`: reach the live board over SSH (LAN `BOARD_IP` first, USB `BOARD_IP_USB` fallback). Board IP and user come from `config.sh`.
+
+**Pre-flash edition** — `local_bsp`: stay on the host and set up a BSP customization workspace (`Linux_for_Tegra`) under `jetson-image/` before flashing. No SSH to the Jetson required.
+
+Implementation is in `function/` (sourced library, not executed on its own).
 
 Overview: [../README.md](../README.md) · Edge scripts: [../edge/README.md](../edge/README.md)
 
@@ -19,6 +25,7 @@ BOARD_USER="${BOARD_USER:-edge}"
 BOARD_IP="${BOARD_IP:-192.168.1.28}"
 BOARD_IP_USB="${BOARD_IP_USB:-192.168.55.1}"
 EDGE_ROOT="${EDGE_ROOT:-~/Edge}"
+BSP_WORKSPACE="${BSP_WORKSPACE:-}"   # empty → <repo>/jetson-image
 ```
 
 Route pick (used by most commands):
@@ -51,7 +58,8 @@ cd scripts
 
 ```bash
 chmod +x scripts/host/inject scripts/host/reject \
-         scripts/host/remote_ssh scripts/host/uninstall scripts/host/install
+         scripts/host/local_bsp scripts/host/pull_rootfs scripts/host/remote_ssh \
+         scripts/host/remote_sshfs scripts/host/uninstall scripts/host/install
 ```
 
 Does not touch the Jetson.
@@ -148,9 +156,89 @@ Tries LAN, then USB. Password SSH may prompt once for the session. Spawn teardow
 
 ---
 
+## `local_bsp`
+
+**Purpose** — Pre-flash edition. Install [NVIDIA jetson-bsp-skills](https://github.com/NVIDIA-AI-IOT/jetson-bsp-skills) on the host and initialize a BSP workspace at **`jetson-image/`** in this repo. Opposite of `remote_ssh`: work stays on your workstation while you customize the platform image (`Linux_for_Tegra`) before flashing.
+
+Where [jetson-device-skills](../edge/README.md#device_skill) run on the live Jetson, BSP skills run on the host. Pick a target, prepare the BSP image and sources, apply customizations (pinmux, USB, PCIe, camera, nvpmodel, etc.), then build, flash, and validate — guided by agent skills in the workspace.
+
+| Stage | What it covers |
+|-------|----------------|
+| **Setup** | Select target, download/register BSP inputs, extract image, init sources |
+| **Customize** | Pinmux, USB, PCIe, UPHY, clocks, fan, nvpmodel, camera, MGBE, memory |
+| **Build** | Rebuild DTBs, kernel modules when kernel-side sources change |
+| **Deploy** | Promote changes into the BSP image, flash, validate |
+
+**Run**
+
+```bash
+cd scripts/host
+./local_bsp
+./local_bsp --workspace ~/my_bsp
+./local_bsp --force
+```
+
+**Raw commands**
+
+```bash
+git clone --depth 1 https://github.com/NVIDIA-AI-IOT/jetson-bsp-skills.git ~/jetson_bsp_skills
+mkdir -p <repo>/jetson-image
+bash ~/jetson_bsp_skills/setup.sh --workspace <repo>/jetson-image
+```
+
+Re-run: `git -C ~/jetson_bsp_skills pull --ff-only`, then `setup.sh` again. Use `--force` to rebuild an existing workspace `.claude/`.
+
+**Paths**
+
+- Clone: `~/jetson_bsp_skills`
+- Workspace: `<repo>/jetson-image` (override with `BSP_WORKSPACE` in `config.sh`)
+
+Does not touch the Jetson. Does not flash — it only prepares the host workspace.
+
+**Next step** — Open the workspace in Claude Code and ask to set up the BSP customization workspace. Entry point: `/jetson-quick-start`. NVIDIA's `setup.sh` targets Claude Code (writes `/.claude/` in the workspace).
+
+Reference: [jetson-bsp-skills](https://github.com/NVIDIA-AI-IOT/jetson-bsp-skills)
+
+---
+
+## `pull_rootfs`
+
+**Purpose** — Seed `jetson-image/Image/Linux_for_Tegra/rootfs/` from the **live Jetson** instead of downloading NVIDIA's sample rootfs. Use when the board already runs the release you want and you will edit from that snapshot.
+
+**What this copies vs what it does not**
+
+| Copied from device | Still from NVIDIA (if you re-flash) |
+|---|---|
+| Full rootfs (`/etc`, `/usr`, `/home`, packages, your configs) | `flash.sh`, bootloader pack, host flash layout |
+| L4T version → `target-platform/*.yaml` `bsp_image.version` | Kernel **source** tree (`public_sources`) for DTB edits |
+
+**Run**
+
+```bash
+cd scripts/host
+./pull_rootfs          # default: quiesce + two tar passes
+./pull_rootfs -y
+./pull_rootfs --fast   # single pass only (faster, less consistent)
+```
+
+**Raw idea**
+
+```bash
+ssh edge@$BOARD_IP 'sudo tar -cpf - --one-file-system --exclude=/proc ... -C / .' \
+  | tar -xpf - -C jetson-image/Image/Linux_for_Tegra/rootfs/
+```
+
+Requires Jetson **sudo** (password once). Large transfer — allow several minutes.
+
+On **Windows Git Bash**, symlinks are dereferenced automatically; `/usr/src` (kernel headers) is skipped. For a full native Linux rootfs tree, run `./pull_rootfs` from **WSL2** instead.
+
+After pull, open **`jetson-image/`** in Cursor and customize. For kernel/DTB work run `/jetson-init-source`; to re-flash run `/jetson-download-bsp` once for host-side `Linux_for_Tegra` tools.
+
+---
+
 ## `remote_ssh`
 
-**Purpose** — Open a shell on the Jetson.
+**Purpose** — Post-flash edition. Open a shell on the Jetson.
 
 **Run**
 
@@ -203,6 +291,8 @@ Requires **sshfs** + FUSE on Linux/macOS/WSL. On **Windows (Git Bash)** install 
 
 ---
 
+## `uninstall`
+
 **Purpose** — Reject everything on the edge, then delete the repo clone from the host.
 
 **Run** (must source — not `./uninstall`)
@@ -242,6 +332,16 @@ If edge cleanup fails, the repo is kept.
 ---
 
 ## Typical flow
+
+**Pre-flash** (host only — customize platform image before flashing):
+
+```bash
+cd scripts/host
+./local_bsp
+# open jetson-image/ in Claude Code → /jetson-quick-start
+```
+
+**Post-flash** (live Jetson over SSH):
 
 ```bash
 cd scripts

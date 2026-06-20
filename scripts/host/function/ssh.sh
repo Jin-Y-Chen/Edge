@@ -24,6 +24,18 @@ board_prompt_password_once() {
   BOARD_SSH_PASSWORD="$pass"
 }
 
+board_prompt_sudo_once() {
+  [[ -n "${BOARD_SUDO_PASSWORD:-}" ]] && return 0
+  local pass
+  if ! read -rs -p "Sudo password for ${BOARD_USER}@Jetson (once): " pass; then
+    echo "" >&2
+    die "Sudo password input failed."
+  fi
+  echo ""
+  [[ -n "$pass" ]] || die "Sudo password cannot be empty."
+  BOARD_SUDO_PASSWORD="$pass"
+}
+
 board_session_begin() {
   local route="$1"
   board_ensure_host_key "$route"
@@ -32,7 +44,7 @@ board_session_begin() {
 }
 
 board_session_end() {
-  unset BOARD_SSH_PASSWORD
+  unset BOARD_SSH_PASSWORD BOARD_SUDO_PASSWORD
 }
 
 board_run_ssh() {

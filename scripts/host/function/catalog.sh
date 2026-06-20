@@ -10,6 +10,7 @@ _catalog_header() {
 inject_declared_spawns() {
   local name="$1" src line rest kind item extra
   src="$(edge_script_path "$name")" || return 0
+  strip_catalog_spawns_for_script "$CATALOG" "$name"
   while IFS= read -r line || [[ -n "$line" ]]; do
     line="${line//$'\r'/}"
     line="${line#"${line%%[![:space:]]*}"}"
@@ -190,6 +191,26 @@ remove_catalog_block() {
     elif [[ $in_drop -eq 1 && -n "$trimmed" ]] && _is_spawn_line "$trimmed"; then
       continue
     elif [[ $in_drop -eq 1 && -z "$trimmed" ]]; then
+      continue
+    fi
+    [[ "$line" == \#* ]] && continue
+    printf '%s\n' "$line" >> "$tmp"
+  done < "$file"
+  mv "$tmp" "$file"
+}
+
+# Remove spawn lines under one catalog entry (keeps the entry line). Re-inject re-syncs from script header.
+strip_catalog_spawns_for_script() {
+  local file="$1" script="$2" tmp in_block trimmed n line
+  tmp="${file}.tmp"
+  in_block=0
+  _catalog_header "$file" "$tmp"
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    trimmed="$(trim_line "$line")"
+    if [[ -n "$trimmed" && "$trimmed" == *"|"* ]]; then
+      n="$(_parse_entry_name "$trimmed")"
+      [[ "$n" == "$script" ]] && in_block=1 || in_block=0
+    elif [[ $in_block -eq 1 && -n "$trimmed" ]] && _is_spawn_line "$trimmed"; then
       continue
     fi
     [[ "$line" == \#* ]] && continue

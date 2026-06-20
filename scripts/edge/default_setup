@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Jetson first-run setup: install jtop.
 # spawn apt python3-pip
-# spawn apt git
 # spawn pip jetson-stats
 # spawn git jetson_stats ~/jetson_stats
 set -euo pipefail
