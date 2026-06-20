@@ -71,7 +71,7 @@ Spawns come from `# spawn KIND ITEM` comments in the edge script header — logg
 | `cat catalog.list` | host | view inject log for reject/uninstall |
 | `./host/remote_ssh` | host | SSH to Jetson |
 | `./host/remote_sshfs` | host | sshfs mount Jetson root |
-| `source ./host/uninstall` | host | reject all + delete repo |
+| `./host/uninstall` | host | reject all + delete repo |
 | `./<name>` | Jetson | run injected script |
 
 Per-script raw commands: [host/README.md](./host/README.md), [edge/README.md](./edge/README.md).
