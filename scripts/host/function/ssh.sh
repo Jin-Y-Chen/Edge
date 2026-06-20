@@ -39,14 +39,16 @@ board_run_ssh() {
   local ip="$1" password="$2" timeout="$3"
   shift 3
   local -a opts=(-o "ConnectTimeout=${timeout}" -o StrictHostKeyChecking=accept-new)
+  local -a tty=()
+  [[ "${BOARD_SSH_ALLOCATE_TTY:-}" == 1 ]] && tty=(-tt)
   local passfile askpass status
 
   if [[ -z "$password" ]]; then
-    ssh "${opts[@]}" "$ip" "$@"
+    ssh "${opts[@]}" "${tty[@]}" "$ip" "$@"
     return $?
   fi
   if command -v sshpass >/dev/null 2>&1; then
-    SSHPASS="$password" sshpass -e ssh "${opts[@]}" -o BatchMode=yes -o PubkeyAuthentication=no \
+    SSHPASS="$password" sshpass -e ssh "${opts[@]}" "${tty[@]}" -o BatchMode=yes -o PubkeyAuthentication=no \
       "$ip" "$@"
     return $?
   fi
@@ -58,7 +60,7 @@ board_run_ssh() {
   printf '#!/bin/sh\ncat "%s"\n' "$passfile" > "$askpass"
   chmod 700 "$askpass"
   DISPLAY="${DISPLAY:-:0}" SSH_ASKPASS="$askpass" SSH_ASKPASS_REQUIRE=force \
-    ssh "${opts[@]}" -o PreferredAuthentications=password -o PubkeyAuthentication=no \
+    ssh "${opts[@]}" "${tty[@]}" -o PreferredAuthentications=password -o PubkeyAuthentication=no \
     "$ip" "$@"
   status=$?
   rm -f "$askpass" "$passfile"
@@ -103,8 +105,8 @@ board_scp() {
 
   while (( attempt < 2 )); do
     status=0
-    board_run_ssh "${BOARD_USER}@${ip_host}" "$password" "$(board_timeout "$route")" \
-      "cat > ${remote_file}" 2>"$errfile" < "$src" || status=$?
+    sed 's/\r$//' < "$src" | board_run_ssh "${BOARD_USER}@${ip_host}" "$password" "$(board_timeout "$route")" \
+      "cat > ${remote_file}" 2>"$errfile" || status=$?
     if [[ $status -eq 0 ]]; then
       rm -f "$errfile"
       return 0
@@ -125,22 +127,41 @@ board_scp() {
 
 board_ssh_stdin() {
   local route="$1" password="${2:-${BOARD_SSH_PASSWORD:-}}" script="${3:?}"
-  local ip_host ip timeout err errfile attempt=0 status
+  local ip_host ip timeout err errfile attempt=0 status remote
   ip_host="$(board_ip "$route")"
   ip="${BOARD_USER}@${ip_host}"
   timeout="$(board_timeout "$route")"
+  remote="/tmp/edge-spawn-$$-${RANDOM}.sh"
   errfile="$(mktemp)"
 
   while (( attempt < 2 )); do
     status=0
-    printf '%s' "$script" | board_run_ssh "$ip" "$password" "$timeout" bash -s \
-      2>"$errfile" || status=$?
+    : >"$errfile"
+    printf '%s' "$script" | board_run_ssh "$ip" "$password" "$timeout" \
+      "cat > ${remote} && chmod 700 ${remote}" 2>"$errfile" || status=$?
+    if [[ $status -ne 0 ]]; then
+      err="$(<"$errfile")"
+      [[ -n "$err" ]] && cat "$errfile" >&2
+      if board_host_key_failed "$err" && (( attempt == 0 )); then
+        board_clear_host_key "$ip_host"
+        attempt=1
+        continue
+      fi
+      rm -f "$errfile"
+      return $status
+    fi
+
+    BOARD_SSH_ALLOCATE_TTY=1
+    board_run_ssh "$ip" "$password" "$timeout" \
+      "bash ${remote}; ec=\$?; rm -f ${remote}; exit \$ec" 2>"$errfile" || status=$?
+    unset BOARD_SSH_ALLOCATE_TTY
+
     if [[ $status -eq 0 ]]; then
       rm -f "$errfile"
       return 0
     fi
     err="$(<"$errfile")"
-    cat "$errfile" >&2
+    [[ -n "$err" ]] && cat "$errfile" >&2
     if board_host_key_failed "$err" && (( attempt == 0 )); then
       board_clear_host_key "$ip_host"
       attempt=1
@@ -163,7 +184,7 @@ inject_via_single_ssh() {
     "$ip" bash -s <<EOF
 mkdir -p ${path}
 base64 -d > ${remote} <<'B64EOF'
-$(base64 < "$src")
+$(sed 's/\r$//' "$src" | base64)
 B64EOF
 chmod +x ${remote}
 EOF

@@ -1,3 +1,9 @@
+===========================
+pip3 list 
+===========================
+
+
+
 ==============================================================================	
 --- Basic Startup Guide
 ==============================================================================	
@@ -12,17 +18,12 @@ Wifi Info   :   nmcli --show-secrets connection show "<SSID>" | grep -i psk
 		# Windows host only: netsh wlan show profile name="<SSID>" key=clear
 Wifi Connect:	sudo nmcli device wifi connect "<SSID>" password "<password>"
 
-
-
-
-
-
-
-
-
 --- Remote ssh
 host IP info:   hostname -I
 remote ssh  :	ssh -X edge@192.168.1.28
+
+
+
 
 --- Performance jtop
 install pip :	sudo apt install python3-pip -y
@@ -30,12 +31,6 @@ install jtop:	sudo -H pip3 install -U jetson-stats
 
 -- (optional) jetpack meta
 sudo apt install nvidia-jetpack
-
--- (optional) patch fix
-git clone https://github.com/jetsonhacks/jetson-jtop-patch.git
-cd jetson-jtop-patch
-chmod +x apply_jtop_fix.sh
-./apply_jtop_fix.sh
 
 -- reboot
 sudo reboot
@@ -51,7 +46,12 @@ run clock   : 	sudo jetson_clocks
 disable GUI :	sudo systemctl set-default multi-user.target
 enable GUI  :	sudo systemctl set-default graphical.target
 need reboot :   sudo reboot
-	    
+
+
+
+
+    
+        
 -- Mount directory
 mkdir -p ~/jetson_root
 sshfs edge@192.168.1.28:/ ~/jetson_root

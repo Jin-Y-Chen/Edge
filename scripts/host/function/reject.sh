@@ -16,12 +16,16 @@ remove_on_edge() {
 _reject_script_route() {
   local name="$1" catalog="$2" route="$3" password="${4:-${BOARD_SSH_PASSWORD:-}}" path
   path="$(catalog_path "$name" "$catalog")" || return 1
-  teardown_script_spawns "$name" "$route" "$password" || true
+  if ! teardown_script_spawns "$name" "$route" "$password"; then
+    echo "Spawn teardown incomplete for ${name}; catalog entry kept." >&2
+    return 1
+  fi
   if board_ssh "rm -f ${path}/${name}" "$route" "$password"; then
     remove_catalog_block "$catalog" "$name"
     echo "Rejected ${name} (${path}/${name}) via ${route}."
     return 0
   fi
+  echo "Could not remove script ${name}; catalog entry kept." >&2
   return 1
 }
 
@@ -86,6 +90,6 @@ reject_one() {
       return 0
     fi
   done
-  echo "Could not reject ${name} via LAN or USB." >&2
+  echo "Could not reject ${name} via LAN or USB; catalog entry kept." >&2
   return 1
 }

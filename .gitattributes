@@ -1,0 +1,4 @@
+# Shell scripts must use LF so they run on Linux (Jetson).
+scripts/edge/* text eol=lf
+scripts/host/* text eol=lf
+module/** text eol=lf

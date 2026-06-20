@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+# Usage: ./remote_sshfs [options] [mount_dir]
+# Mount Jetson filesystem on the host via sshfs. Prompts for an absolute mount path if omitted.
+set -euo pipefail
+
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/function/host.sh"
+host_init "${BASH_SOURCE[0]}"
+
+ACTION=mount
+MOUNT_DIR=""
+SSHFS_CMD="sshfs"
+
+usage() {
+  cat <<'EOF'
+Usage: ./remote_sshfs [options] [mount_dir]
+
+  Mount the Jetson root over SSH. If mount_dir is omitted, prompts for an absolute
+  path on this machine (default: ~/jetson_root).
+
+Options:
+  -u, --umount    unmount mount_dir (prompts if omitted)
+  -h, --help      this message
+
+Linux/macOS/WSL: requires sshfs + FUSE.
+Windows (Git Bash): uses sshfs.exe from SSHFS-Win if installed (same as manual
+  sshfs edge@IP:/ ~/jetson_root). Falls back to net use if only sshfs-win.exe exists.
+EOF
+}
+
+SSHFS_BACKEND="native"
+
+is_windows_host() {
+  case "${OS:-}${MSYSTEM:-}" in
+    Windows_NT*|MINGW*|MSYS*) return 0 ;;
+  esac
+  uname -s 2>/dev/null | grep -qiE 'mingw|msys|cygwin|nt'
+}
+
+expand_tilde() {
+  local p="$1"
+  [[ "$p" == "~" ]] && { echo "$HOME"; return 0; }
+  [[ "$p" == "~/"* ]] && { echo "${HOME}/${p#~/}"; return 0; }
+  [[ "$p" == "~"* ]] && { echo "${HOME}/${p#~}"; return 0; }
+  echo "$p"
+}
+
+normalize_path() {
+  local p="$1" drive rest
+  p="${p#"${p%%[![:space:]]*}"}"
+  p="${p%"${p##*[![:space:]]}"}"
+  p="${p#\"}"; p="${p%\"}"
+  p="${p#\'}"; p="${p%\'}"
+  p="$(expand_tilde "$p")"
+  p="${p//\\//}"
+  if [[ "$p" =~ ^([A-Za-z]):(/.*)?$ ]]; then
+    drive="${BASH_REMATCH[1],,}"
+    rest="${BASH_REMATCH[2]#/}"
+    if [[ -n "$rest" ]]; then
+      p="/${drive}/${rest}"
+    else
+      p="/${drive}"
+    fi
+  fi
+  echo "$p"
+}
+
+require_absolute_path() {
+  local p
+  p="$(normalize_path "$1")"
+  [[ "$p" == /* ]] || return 1
+  echo "$p"
+}
+
+msys_to_win_path() {
+  local p="$1" drive rest
+  if [[ "$p" =~ ^/([a-zA-Z])/(.*)$ ]]; then
+    drive="${BASH_REMATCH[1]}"
+    rest="${BASH_REMATCH[2]//\//\\}"
+    printf '%s:\\%s' "${drive^^}" "$rest"
+    return 0
+  fi
+  return 1
+}
+
+mount_meta_file() {
+  printf '%s.meta' "$1"
+}
+
+is_mounted() {
+  local mp="$1"
+  if [[ -f "$(mount_meta_file "$mp")" ]]; then
+    grep -q '^backend=netuse$' "$(mount_meta_file "$mp")" 2>/dev/null && return 0
+  fi
+  if is_windows_host && [[ -f "$(mount_meta_file "$mp")" ]] && grep -q '^backend=wsl$' "$(mount_meta_file "$mp")" 2>/dev/null; then
+    return 0
+  fi
+  if command -v mountpoint >/dev/null 2>&1; then
+    mountpoint -q "$mp" 2>/dev/null && return 0
+  fi
+  mount 2>/dev/null | grep -qF " on ${mp} "
+}
+
+sshfs_win_bin_dir() {
+  local d
+  for d in "/c/Program Files/SSHFS-Win/bin" "/c/Program Files (x86)/SSHFS-Win/bin"; do
+    [[ -d "$d" ]] && { echo "$d"; return 0; }
+  done
+  return 1
+}
+
+sshfs_win_installed() {
+  local d
+  d="$(sshfs_win_bin_dir 2>/dev/null)" || return 1
+  [[ -x "${d}/sshfs-win.exe" || -x "${d}/sshfs.exe" ]]
+}
+
+die_sshfs_missing() {
+  if is_windows_host; then
+    die "$(cat <<'EOF'
+sshfs not found.
+
+If this worked before, WinFsp + SSHFS-Win may be uninstalled or not on PATH.
+Reinstall (PowerShell), restart Git Bash, then retry:
+
+  winget install WinFsp.WinFsp
+  winget install SSHFS-Win.SSHFS-Win
+
+Manual check:
+  ls "/c/Program Files/SSHFS-Win/bin/sshfs.exe"
+
+Once installed, Git Bash can run the same command as before:
+  sshfs edge@<IP>:/ ~/jetson_root
+
+Or use Remote SSH in Cursor (host/README.md).
+EOF
+)"
+  fi
+  die "sshfs not found. Install sshfs and FUSE (Linux: sudo apt install sshfs)."
+}
+
+find_sshfs() {
+  local bindir
+  if command -v sshfs >/dev/null 2>&1; then
+    SSHFS_CMD="sshfs"
+    SSHFS_BACKEND="native"
+    return 0
+  fi
+  if is_windows_host && bindir="$(sshfs_win_bin_dir 2>/dev/null)"; then
+    if [[ -x "${bindir}/sshfs.exe" ]]; then
+      SSHFS_CMD="${bindir}/sshfs.exe"
+      SSHFS_BACKEND="native"
+      export PATH="${bindir}:${PATH}"
+      return 0
+    fi
+    if [[ -x "${bindir}/sshfs-win.exe" ]]; then
+      SSHFS_BACKEND="netuse"
+      return 0
+    fi
+  fi
+  if command -v wsl >/dev/null 2>&1 && wsl -e true 2>/dev/null; then
+    if wsl -e bash -lc 'command -v sshfs' >/dev/null 2>&1; then
+      SSHFS_CMD="wsl"
+      SSHFS_BACKEND="wsl"
+      return 0
+    fi
+  fi
+  return 1
+}
+
+pick_drive_letter() {
+  local letter
+  for letter in Z Y X W V U T S R Q P O N M L K J; do
+    if ! cmd.exe //c "if exist ${letter}:\\ (exit /b 0) else (exit /b 1)" >/dev/null 2>&1; then
+      echo "${letter}:"
+      return 0
+    fi
+  done
+  return 1
+}
+
+windows_mount() {
+  local mount_dir="$1" user="$2" ip="$3" unc win_link win_target letter meta
+  unc="\\\\sshfs.r\\${user}@${ip}"
+  win_link="$(msys_to_win_path "$mount_dir")" || die "Could not convert mount path: ${mount_dir}"
+  letter="$(pick_drive_letter)" || die "No free drive letter for SSHFS-Win (Z:–J: all in use)."
+
+  if [[ -e "$mount_dir" ]]; then
+    if [[ -L "$mount_dir" ]]; then
+      die "Mount path is already a junction: ${mount_dir} (use --umount first)"
+    fi
+    if [[ -d "$mount_dir" ]] && [[ -z "$(ls -A "$mount_dir" 2>/dev/null || true)" ]]; then
+      rmdir "$mount_dir" 2>/dev/null || true
+    else
+      die "Mount path exists and is not empty: ${mount_dir}"
+    fi
+  fi
+
+  echo "Mapping ${letter} -> ${unc} ..."
+  if ! cmd.exe //c "net use ${letter} ${unc}"; then
+    die "net use failed. Is WinFsp + SSHFS-Win installed?"
+  fi
+
+  win_target="${letter}\\"
+  echo "Linking ${win_link} -> ${win_target} ..."
+  if ! cmd.exe //c "mklink /J \"${win_link}\" \"${win_target}\""; then
+    cmd.exe //c "net use ${letter} /delete" >/dev/null 2>&1 || true
+    die "mklink failed (try running Git Bash as Administrator)."
+  fi
+
+  meta="$(mount_meta_file "$mount_dir")"
+  {
+    echo "backend=netuse"
+    echo "$letter"
+  } >"$meta"
+  echo "Mounted. Jetson root at: ${mount_dir} (drive ${letter})"
+  echo "Unmount: ./host/remote_sshfs --umount ${mount_dir}"
+}
+
+windows_umount() {
+  local mount_dir="$1" meta letter win_link
+  meta="$(mount_meta_file "$mount_dir")"
+  [[ -f "$meta" ]] || die "No mount metadata for ${mount_dir}"
+  letter="$(grep -v '^backend=' "$meta" | head -1 | tr -d '[:space:]')"
+  win_link="$(msys_to_win_path "$mount_dir")" || die "Could not convert mount path: ${mount_dir}"
+
+  if [[ -L "$mount_dir" ]] || [[ -d "$mount_dir" ]]; then
+    cmd.exe //c "rmdir \"${win_link}\"" 2>/dev/null || true
+  fi
+  cmd.exe //c "net use ${letter} /delete" 2>/dev/null || true
+  rm -f "$meta"
+  echo "Unmounted ${mount_dir}."
+}
+
+do_umount() {
+  local mp="$1" meta
+  meta="$(mount_meta_file "$mp")"
+  if [[ -f "$meta" ]] && grep -q '^backend=netuse$' "$meta" 2>/dev/null; then
+    windows_umount "$mp"
+    return 0
+  fi
+  if [[ -f "$meta" ]] && grep -q '^backend=wsl$' "$meta" 2>/dev/null; then
+    wsl_umount "$mp"
+    return 0
+  fi
+  is_mounted "$mp" || die "Not mounted: ${mp}"
+  if command -v fusermount >/dev/null 2>&1; then
+    fusermount -u "$mp"
+  elif command -v fusermount3 >/dev/null 2>&1; then
+    fusermount3 -u "$mp"
+  else
+    local bindir
+    bindir="$(sshfs_win_bin_dir 2>/dev/null || true)"
+    if [[ -n "$bindir" && -x "${bindir}/fusermount.exe" ]]; then
+      "${bindir}/fusermount.exe" -u "$mp"
+    else
+      umount "$mp" 2>/dev/null || true
+    fi
+  fi
+  rm -f "$meta"
+  echo "Unmounted ${mp}."
+}
+
+wsl_mount() {
+  local mount_dir="$1" user="$2" ip="$3" timeout="$4" wsl_path meta
+  wsl_path="$(wsl -e wslpath -u "$mount_dir")" || die "wslpath failed for ${mount_dir}"
+  echo "Mounting via WSL sshfs -> ${wsl_path} ..."
+  wsl -e bash -lc "mkdir -p '$(printf '%s' "$wsl_path" | sed "s/'/'\\\\''/g")' && sshfs -o ConnectTimeout=${timeout} -o reconnect '${user}@${ip}:/' '$(printf '%s' "$wsl_path" | sed "s/'/'\\\\''/g")'" \
+    || die "WSL sshfs mount failed (try: wsl sudo apt install sshfs)."
+  meta="$(mount_meta_file "$mount_dir")"
+  printf 'backend=wsl\n' >"$meta"
+  echo "Mounted via WSL. Jetson files at: ${mount_dir}"
+  echo "Unmount: ./host/remote_sshfs --umount ${mount_dir}"
+}
+
+wsl_umount() {
+  local mount_dir="$1" wsl_path meta
+  meta="$(mount_meta_file "$mount_dir")"
+  wsl_path="$(wsl -e wslpath -u "$mount_dir")" || die "wslpath failed for ${mount_dir}"
+  wsl -e bash -lc "fusermount -u '$(printf '%s' "$wsl_path" | sed "s/'/'\\\\''/g")' 2>/dev/null || umount '$(printf '%s' "$wsl_path" | sed "s/'/'\\\\''/g")'"
+  rm -f "$meta"
+  echo "Unmounted ${mount_dir}."
+}
+
+prompt_mount_dir() {
+  local default input resolved
+  default="$(require_absolute_path "${HOME}/jetson_root")" || die "Could not resolve default mount path."
+  while true; do
+    read -rp "Absolute mount directory [${default}]: " input
+    input="${input:-$default}"
+    if resolved="$(require_absolute_path "$input" 2>/dev/null)"; then
+      echo "$resolved"
+      return 0
+    fi
+    echo "Enter an absolute path (e.g. ${default} or C:/Users/you/jetson_root)." >&2
+  done
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -u|--umount) ACTION=umount; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) die "Unknown option: $1 (try --help)" ;;
+    *)
+      MOUNT_DIR="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$MOUNT_DIR" ]]; then
+  MOUNT_DIR="$(prompt_mount_dir)"
+else
+  MOUNT_DIR="$(require_absolute_path "$MOUNT_DIR")" || \
+    die "Mount path must be absolute: $MOUNT_DIR"
+fi
+
+if [[ "$ACTION" == umount ]]; then
+  do_umount "$MOUNT_DIR"
+  exit 0
+fi
+
+find_sshfs || die_sshfs_missing
+
+pick_route || die "Could not reach board (LAN ${BOARD_IP}, USB ${BOARD_IP_USB})."
+board_ensure_host_key "$BOARD_ROUTE"
+
+remote="${BOARD_USER}@$(board_ip "$BOARD_ROUTE"):"
+timeout="$(board_timeout "$BOARD_ROUTE")"
+board_ip_addr="$(board_ip "$BOARD_ROUTE")"
+
+if is_mounted "$MOUNT_DIR"; then
+  die "Already mounted: ${MOUNT_DIR} (use --umount ${MOUNT_DIR})"
+fi
+
+if [[ "$SSHFS_BACKEND" == wsl ]]; then
+  wsl_mount "$MOUNT_DIR" "$BOARD_USER" "$board_ip_addr" "$timeout"
+  exit 0
+fi
+
+if [[ "$SSHFS_BACKEND" == netuse ]]; then
+  windows_mount "$MOUNT_DIR" "$BOARD_USER" "$board_ip_addr"
+  exit 0
+fi
+
+mkdir -p "$MOUNT_DIR"
+
+echo "Mounting ${remote}/ -> ${MOUNT_DIR} (${BOARD_ROUTE}) ..."
+if [[ "$SSHFS_CMD" == *sshfs.exe ]]; then
+  echo "Using ${SSHFS_CMD}"
+fi
+if ! "$SSHFS_CMD" -o "ConnectTimeout=${timeout}" -o reconnect "$remote" "$MOUNT_DIR"; then
+  rmdir "$MOUNT_DIR" 2>/dev/null || true
+  if is_windows_host; then
+    die "sshfs mount failed. Reinstall WinFsp + SSHFS-Win, or enable FUSE for Cygwin (see sshfs-win README)."
+  fi
+  die "sshfs mount failed."
+fi
+
+echo "Mounted. Jetson files at: ${MOUNT_DIR}"
+echo "Unmount: ./host/remote_sshfs --umount ${MOUNT_DIR}"

@@ -36,7 +36,7 @@ scripts/
 
 1. **Inject** — copy script to Jetson, write `catalog.list` entry, log `# spawn` lines as `> KIND ITEM`.
 2. **Run** — separate step on the Jetson; inject does not execute anything.
-3. **Reject** — `rm` script on edge, undo catalog spawns (skip if never installed).
+3. **Reject** — undo catalog spawns in order (pip → git/dir → apt), with post-cleanup (`pip cache purge`, `daemon-reload`, `apt autoremove`, `apt autoclean`); removes script and catalog entry only if every step succeeds.
 4. **Uninstall** — reject all, optionally delete host repo.
 
 Host connectivity: **LAN** (`BOARD_IP`) first, **USB** (`BOARD_IP_USB`) second.
@@ -73,8 +73,9 @@ Spawns come from `# spawn KIND ITEM` comments in the edge script header — logg
 | `./host/inject <name>` | host | copy to Jetson + catalog |
 | `./host/reject <name>` | host | remove script + spawns |
 | `./host/reject --all` | host | remove all entries |
-| `./host/catalog list` | host | show inject log for reject/uninstall |
+| `cat catalog.list` | host | view inject log for reject/uninstall |
 | `./host/remote_ssh` | host | SSH to Jetson |
+| `./host/remote_sshfs` | host | sshfs mount Jetson root |
 | `source ./host/uninstall` | host | reject all + delete repo |
 | `./<name>` | Jetson | run injected script |
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Jetson first-run setup: install jtop.
 # spawn apt python3-pip
+# spawn apt git
 # spawn pip jetson-stats
+# spawn git jetson_stats ~/jetson_stats
 set -euo pipefail
 
 [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && {
@@ -12,9 +14,23 @@ set -euo pipefail
 sudo -n true 2>/dev/null || { echo "Sudo password required."; sudo -v; }
 
 echo "Installing pip ..."
-sudo apt install -y python3-pip
+sudo apt install -y python3-pip git
 
-echo "Installing jtop (jetson-stats) ..."
-sudo -H pip3 install -U jetson-stats
+echo "Installing jtop (jetson-stats from GitHub) ..."
+pip3 show UNKNOWN &>/dev/null && sudo pip3 uninstall -y UNKNOWN
+pip3 show jetson-stats &>/dev/null && sudo pip3 uninstall -y jetson-stats
+sudo -H pip3 install -U pip setuptools wheel
 
-echo "Done. Run: sudo jtop"
+clone_dir="${HOME}/jetson_stats"
+echo "Cloning jetson_stats to ${clone_dir} ..."
+sudo rm -rf "$clone_dir"
+git clone --depth 1 https://github.com/rbonghi/jetson_stats.git "$clone_dir"
+echo "Installing from clone (not pip git+https — avoids UNKNOWN package) ..."
+sudo -H pip3 install -U "$clone_dir"
+
+command -v jtop >/dev/null || { echo "jtop install failed." >&2; exit 1; }
+
+echo "Starting jtop service ..."
+sudo systemctl restart jtop.service
+
+echo "Run: sudo jtop"

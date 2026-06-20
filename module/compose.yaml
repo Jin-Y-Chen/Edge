@@ -1,0 +1,79 @@
+# Jetson Orin — build from module/ on the board (after host setup: connect_wifi, max_power).
+#   docker compose build
+#   docker compose up -d camera-imx
+# Match L4T_TAG in each Dockerfile to your JetPack (jtop INFO page).
+
+services:
+  camera-imx:
+    build: ./camera/IMX
+    image: edge-camera-imx
+    container_name: edge-camera-imx
+    runtime: nvidia
+    network_mode: host
+    restart: unless-stopped
+    devices:
+      - ${CAMERA_DEVICE:-/dev/video0}:${CAMERA_DEVICE:-/dev/video0}
+    volumes:
+      - /tmp:/tmp
+    environment:
+      CAMERA_DEVICE: ${CAMERA_DEVICE:-/dev/video0}
+      FRAME_OUTPUT: /tmp/edge_frame.png
+
+  gimbal-c20t:
+    build: ./gimbal/C-20T
+    image: edge-gimbal-c20t
+    container_name: edge-gimbal-c20t
+    network_mode: host
+    restart: unless-stopped
+    devices:
+      - ${GIMBAL_PORT:-/dev/ttyUSB0}:${GIMBAL_PORT:-/dev/ttyUSB0}
+    environment:
+      GIMBAL_PORT: ${GIMBAL_PORT:-/dev/ttyUSB0}
+      GIMBAL_BAUD: ${GIMBAL_BAUD:-115200}
+
+  power-supply:
+    build: ./power_supply/power_supply
+    image: edge-power-supply
+    container_name: edge-power-supply
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      POLL_INTERVAL_SEC: ${POLL_INTERVAL_SEC:-5}
+      # I2C bus for external PSU monitor (uncomment device if used):
+      # I2C_BUS: /dev/i2c-1
+
+  cuda:
+    build: ./CUDA
+    image: edge-cuda
+    container_name: edge-cuda
+    runtime: nvidia
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+    environment:
+      CUDA_PORT: ${CUDA_PORT:-8080}
+      RUN_LLM: ${RUN_LLM:-0}
+
+  # Pre-built LLM image (docs/jetson-config-command.txt). Enable with: docker compose --profile llm up -d
+  cuda-llm:
+    profiles: [llm]
+    image: ghcr.io/nvidia-ai-iot/llama_cpp:latest-jetson-orin
+    container_name: edge-cuda-llm
+    runtime: nvidia
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+    command:
+      - llama-server
+      - -hf
+      - ${LLM_MODEL:-unsloth/gemma-4-E2B-it-GGUF:Q4_K_M}
+      - --host
+      - 0.0.0.0
+      - --port
+      - ${CUDA_PORT:-8080}
+      - -t
+      - ${LLM_THREADS:-6}
+      - --n-gpu-layers
+      - ${LLM_GPU_LAYERS:-99}

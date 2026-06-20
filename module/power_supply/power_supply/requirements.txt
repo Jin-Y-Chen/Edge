@@ -1,0 +1,2 @@
+# smbus2 only needed when I2C_BUS is set
+smbus2>=0.4.3

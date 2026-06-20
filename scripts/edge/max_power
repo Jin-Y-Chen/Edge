@@ -1,0 +1,350 @@
+#!/usr/bin/env bash
+# Jetson performance: nvpmodel, jetson_clocks, fan profile, optional GUI boot target.
+# Usage: ./max_power [options] | ./max_power status
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: ./max_power [options]
+       ./max_power status
+
+  Default: maxn_super + jetson_clocks + fan cool (1). GUI unchanged unless --gui is set.
+
+Options:
+  --mode NAME     15w | 25w | maxn_super (default: maxn_super)
+  --gui N         0 = headless (multi-user.target), 1 = desktop (graphical.target)
+  --fan N         0 = quiet, 1 = cool (default), 2 = manual
+  --fanspeed PCT  fan speed 0-100 (manual mode; use with --fan 2)
+  -h, --help      this message
+
+Env: MAX_POWER_MODE=NAME overrides --mode (same names as --mode).
+EOF
+}
+
+normalize_mode_name() {
+  local n="${1,,}"
+  case "$n" in
+    15|15w) echo 15W ;;
+    25|25w) echo 25W ;;
+    maxn|maxn_super|maxn-super|max) echo MAXN ;;
+    *) echo "$1" ;;
+  esac
+}
+
+is_max_performance_mode() {
+  local n="${1,,}"
+  case "$n" in
+    maxn|maxn_super|maxn-super|max) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_awk_find_mode() {
+  local key="$1" conf="$2"
+  awk -v key="$key" '
+    function u(s) { return toupper(s) }
+    function trim(s) {
+      sub(/^[[:space:]]+/, "", s)
+      sub(/[[:space:]]+$/, "", s)
+      return s
+    }
+    function id_from_power_model(line,    m) {
+      if (match(line, /ID[[:space:]]*=[[:space:]]*[0-9]+/)) {
+        m = substr(line, RSTART, RLENGTH)
+        sub(/^.*=[[:space:]]*/, "", m)
+        return m
+      }
+      return ""
+    }
+    function name_from_power_model(line,    m) {
+      if (match(line, /NAME[[:space:]]*=[^>]+/)) {
+        m = substr(line, RSTART, RLENGTH)
+        sub(/^NAME[[:space:]]*=[[:space:]]*/, "", m)
+        gsub(/[[:space:]]+$/, "", m)
+        return u(m)
+      }
+      return ""
+    }
+    function name_matches(want, name) {
+      if (want == "MAXN" && index(name, "MAXN_SUPER") > 0) return 0
+      if (index(name, want) > 0) return 1
+      gsub(/[^A-Z0-9]/, "", name)
+      gsub(/[^A-Z0-9]/, "", want)
+      return (name != "" && want != "" && index(name, want) > 0)
+    }
+    BEGIN {
+      want = u(key)
+      gsub(/[[:space:]]+/, "", want)
+    }
+    /<[[:space:]]*POWER_MODEL/ {
+      id = id_from_power_model($0)
+      name = name_from_power_model($0)
+      if (id != "" && name_matches(want, name)) {
+        print id
+        exit
+      }
+      next
+    }
+    /^</ {
+      tag = $0
+      gsub(/[<>[:space:]]/, "", tag)
+      in_block = (index(u(tag), want) > 0)
+      next
+    }
+    in_block && /^MODE[[:space:]]+/ { print $2; exit }
+    /^MODE[[:space:]]+/ {
+      mode = $2
+      if ((getline nextline) > 0 && name_matches(want, u(trim(nextline)))) {
+        print mode
+        exit
+      }
+    }
+  ' "$conf"
+}
+
+_list_nvpmodel_confs() {
+  local conf=/etc/nvpmodel.conf f
+  [[ -f "$conf" ]] && echo "$conf"
+  if [[ -d /etc/nvpmodel ]]; then
+    for f in /etc/nvpmodel/*.conf; do
+      [[ -f "$f" && "$f" != "$conf" ]] && echo "$f"
+    done
+  fi
+}
+
+resolve_nvpmodel_mode() {
+  local want="$1" key result="" conf
+  key="$(normalize_mode_name "$want")"
+
+  if [[ "$key" =~ ^[0-9]+$ ]]; then
+    echo "$key"
+    return 0
+  fi
+
+  while IFS= read -r conf; do
+    [[ -f "$conf" ]] || continue
+    if [[ "$key" == MAXN ]]; then
+      result="$(_awk_find_mode "MAXN_SUPER" "$conf")"
+      [[ -n "$result" ]] || result="$(_awk_find_mode "MAXN" "$conf")"
+    else
+      result="$(_awk_find_mode "$key" "$conf")"
+    fi
+    if [[ -n "$result" ]]; then
+      echo "$result"
+      return 0
+    fi
+  done < <(_list_nvpmodel_confs)
+
+  if [[ ! -f /etc/nvpmodel.conf && -z "$(ls -A /etc/nvpmodel 2>/dev/null || true)" ]]; then
+    echo "nvpmodel.conf not found; cannot resolve mode ${want}." >&2
+    return 1
+  fi
+  return 1
+}
+
+find_pwm_path() {
+  local h name p
+  for h in /sys/devices/platform/pwm-fan/hwmon/hwmon* /sys/class/hwmon/hwmon*; do
+    [[ -d "$h" ]] || continue
+    name="$(cat "${h}/name" 2>/dev/null || true)"
+    [[ "$name" == *pwm* || "$name" == *fan* || "$h" == *pwm-fan* ]] || continue
+    p="${h}/pwm1"
+    [[ -e "$p" ]] || continue
+    echo "$p"
+    return 0
+  done
+  echo "pwm1 sysfs path not found." >&2
+  return 1
+}
+
+show_status() {
+  command -v nvpmodel >/dev/null || { echo "nvpmodel not found." >&2; exit 1; }
+  echo "nvpmodel:"
+  nvpmodel -q 2>/dev/null || sudo nvpmodel -q
+  if command -v jetson_clocks >/dev/null; then
+    echo ""
+    echo "jetson_clocks:"
+    jetson_clocks --show 2>/dev/null || sudo jetson_clocks --show 2>/dev/null || true
+  fi
+  echo ""
+  echo "default boot target:"
+  systemctl get-default 2>/dev/null || true
+  if [[ -f /etc/nvfancontrol.conf ]]; then
+    echo ""
+    echo "fan default profile:"
+    grep 'FAN_DEFAULT_PROFILE' /etc/nvfancontrol.conf 2>/dev/null | head -1 || true
+  fi
+  if pwm="$(find_pwm_path 2>/dev/null)"; then
+    echo ""
+    echo "fan pwm (manual):"
+    cat "$pwm" 2>/dev/null || true
+  fi
+}
+
+apply_nvpmodel() {
+  local mode="$1"
+  command -v nvpmodel >/dev/null || { echo "nvpmodel not found." >&2; exit 1; }
+  echo "Setting nvpmodel mode ${mode} ..."
+  if ! sudo nvpmodel -m "$mode"; then
+    echo "Failed: nvpmodel -m ${mode}" >&2
+    echo "List modes: sudo nvpmodel -q" >&2
+    exit 1
+  fi
+  nvpmodel -q 2>/dev/null || sudo nvpmodel -q
+}
+
+apply_jetson_clocks() {
+  if command -v jetson_clocks >/dev/null; then
+    echo "Running jetson_clocks ..."
+    sudo jetson_clocks
+  else
+    echo "jetson_clocks not found; skipping." >&2
+  fi
+}
+
+_set_fan_profile() {
+  local profile="$1" conf=/etc/nvfancontrol.conf
+  [[ -f "$conf" ]] || { echo "nvfancontrol.conf not found; skipping fan ${profile}." >&2; return 0; }
+  grep -qE "FAN_PROFILE[[:space:]]+${profile}([[:space:]]|\{)" "$conf" || {
+    echo "FAN_PROFILE ${profile} not in ${conf}; skipping." >&2
+    return 0
+  }
+  echo "Setting fan profile to ${profile} ..."
+  sudo sed -i "s/^\([[:space:]]*FAN_DEFAULT_PROFILE\)[[:space:]]*.*/\1 ${profile}/" "$conf"
+  sudo rm -f /var/lib/nvfancontrol/status 2>/dev/null || true
+  if ! sudo systemctl restart nvfancontrol; then
+    echo "Failed to restart nvfancontrol." >&2
+    return 1
+  fi
+  echo "Fan profile: ${profile}."
+}
+
+set_fan_quiet() { _set_fan_profile quiet; }
+set_fan_cool() { _set_fan_profile cool; }
+
+set_fan_manual() {
+  local percent="${1:-50}" pwm pwm_path
+  [[ "$percent" =~ ^[0-9]+$ ]] || {
+    echo "fanspeed must be an integer 0-100." >&2
+    return 1
+  }
+  percent=$((10#$percent))
+  if (( percent < 0 || percent > 100 )); then
+    echo "fanspeed must be 0-100." >&2
+    return 1
+  fi
+  pwm=$(( percent * 255 / 100 ))
+  echo "Setting fan manual at ${percent}% ..."
+  sudo systemctl stop nvfancontrol 2>/dev/null || true
+  pwm_path="$(find_pwm_path)"
+  echo "$pwm" | sudo tee "$pwm_path" >/dev/null
+  echo "Fan manual: ${percent}% (PWM ${pwm})."
+}
+
+set_gui() {
+  case "$1" in
+    0)
+      echo "Disabling GUI (multi-user.target) ..."
+      sudo systemctl set-default multi-user.target
+      ;;
+    1)
+      echo "Enabling GUI (graphical.target) ..."
+      sudo systemctl set-default graphical.target
+      ;;
+    *)
+      echo "Invalid --gui value: $1 (use 0 or 1)." >&2
+      return 1
+      ;;
+  esac
+}
+
+MODE_NAME="maxn_super"
+GUI=""
+FAN="1"
+FANSPEED=""
+REBOOT=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    status) show_status; exit 0 ;;
+    --mode)
+      [[ $# -ge 2 ]] || { echo "Missing value for --mode." >&2; exit 1; }
+      MODE_NAME="$2"
+      shift 2
+      ;;
+    --gui)
+      [[ $# -ge 2 ]] || { echo "Missing value for --gui (0 or 1)." >&2; exit 1; }
+      GUI="$2"
+      shift 2
+      ;;
+    --fan)
+      [[ $# -ge 2 ]] || { echo "Missing value for --fan (0, 1, or 2)." >&2; exit 1; }
+      FAN="$2"
+      shift 2
+      ;;
+    --fanspeed)
+      [[ $# -ge 2 ]] || { echo "Missing value for --fanspeed." >&2; exit 1; }
+      FANSPEED="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+[[ -n "${MAX_POWER_MODE:-}" ]] && MODE_NAME="$MAX_POWER_MODE"
+
+[[ "$FAN" =~ ^[012]$ ]] || { echo "Invalid --fan value: ${FAN} (use 0, 1, or 2)." >&2; exit 1; }
+[[ -z "$GUI" || "$GUI" =~ ^[01]$ ]] || { echo "Invalid --gui value: ${GUI} (use 0 or 1)." >&2; exit 1; }
+if [[ -n "$FANSPEED" && ! "$FANSPEED" =~ ^[0-9]+$ ]]; then
+  echo "Invalid --fanspeed value: ${FANSPEED} (use 0-100)." >&2
+  exit 1
+fi
+
+sudo -n true 2>/dev/null || { echo "Sudo password required."; sudo -v; }
+
+mode_idx="$(resolve_nvpmodel_mode "$MODE_NAME")" || {
+  echo "Could not resolve --mode ${MODE_NAME}." >&2
+  echo "Check: sudo nvpmodel -q && grep -E 'POWER_MODEL|NAME=' /etc/nvpmodel.conf" >&2
+  if is_max_performance_mode "$MODE_NAME"; then
+    echo "MAXN_SUPER needs JetPack 6.2+ flashed with jetson-orin-nano-devkit-super, or copy the super nvpmodel conf from /etc/nvpmodel/." >&2
+  fi
+  exit 1
+}
+[[ "$mode_idx" =~ ^[0-9]+$ ]] || {
+  echo "Resolved invalid mode index: ${mode_idx}" >&2
+  exit 1
+}
+
+apply_nvpmodel "$mode_idx"
+
+if is_max_performance_mode "$MODE_NAME"; then
+  apply_jetson_clocks
+else
+  echo "Skipping jetson_clocks for --mode ${MODE_NAME} (not max performance)." >&2
+fi
+
+case "$FAN" in
+  0) set_fan_quiet ;;
+  1) set_fan_cool ;;
+  2) set_fan_manual "${FANSPEED:-50}" ;;
+esac
+
+if [[ -n "$FANSPEED" && "$FAN" != 2 ]]; then
+  echo "Note: --fanspeed ignored unless --fan 2 (manual)." >&2
+fi
+
+if [[ -n "$GUI" ]]; then
+  set_gui "$GUI"
+  REBOOT=1
+fi
+
+if (( REBOOT )); then
+  echo "Reboot required: sudo reboot"
+fi
+
+echo "Done. Check with: sudo jtop (CTRL / ALL pages)"
