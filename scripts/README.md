@@ -2,11 +2,6 @@
 
 Host-managed ops for the Jetson: scripts live on the laptop, get injected to the edge, run manually on the device, and `catalog.list` tracks what reject/uninstall should remove.
 
-| Area | Doc |
-|------|-----|
-| Host commands (`inject`, `reject`, SSH, …) | [host/README.md](./host/README.md) |
-| Edge scripts (what runs on the Jetson) | [edge/README.md](./edge/README.md) |
-
 ## Layout
 
 ```
@@ -69,14 +64,13 @@ Spawns come from `# spawn KIND ITEM` comments in the edge script header — logg
 
 | Command | Where | Purpose |
 |---------|-------|---------|
+| `cat catalog.list` | host | view inject log for reject/uninstall |
 | `./host/install` | host | `chmod +x` host scripts |
 | `./host/inject <name>` | host | copy to Jetson + catalog |
 | `./host/reject <name>` | host | remove script + spawns |
-| `./host/reject --all` | host | remove all entries |
-| `cat catalog.list` | host | view inject log for reject/uninstall |
 | `./host/remote_ssh` | host | SSH to Jetson |
 | `./host/remote_sshfs` | host | sshfs mount Jetson root |
-| `source ./host/uninstall` | host | reject all + delete repo |
+| `./host/uninstall` | host | reject all + delete repo |
 | `./<name>` | Jetson | run injected script |
 
 Per-script raw commands: [host/README.md](./host/README.md), [edge/README.md](./edge/README.md).
