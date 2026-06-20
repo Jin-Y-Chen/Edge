@@ -56,10 +56,7 @@ scripts/
   catalog.list
   host/                  # install, inject, reject, remote_ssh, uninstall
   edge/
-    connect_wifi         # runs on Jetson at ~/Edge after inject
 ```
-
-**Reference** — [docs/jetson-config-command.txt](./docs/jetson-config-command.txt) (jtop, nvpmodel, sshfs, etc.)
 
 **Modules** — [`module/`](./module/) (camera, gimbal, power supply)
 
